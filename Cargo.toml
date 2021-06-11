@@ -1,0 +1,12 @@
+[package]
+name = "reccon"
+version = "0.1.0"
+authors = ["liangjs <liangjs@pku.edu.cn>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+intrusive-collections = "0.9.1"
+itertools = "0.10.1"
