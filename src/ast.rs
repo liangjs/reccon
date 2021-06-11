@@ -1,3 +1,5 @@
+use itertools::Itertools;
+
 #[derive(Debug, Clone)]
 pub enum Single {
     Original { node_num: usize },
@@ -18,10 +20,10 @@ impl ToString for Single {
 }
 
 #[derive(Debug, Clone)]
-pub enum AST {
+pub enum Statement {
     Compound {
-        first: Box<AST>,
-        next: Box<AST>,
+        first: Box<Statement>,
+        next: Box<Statement>,
     },
     Original {
         node_num: usize,
@@ -32,24 +34,66 @@ pub enum AST {
     },
     IfThen {
         cond: Box<BoolExpr>,
-        body_then: Box<AST>,
+        body_then: Box<Statement>,
     },
     IfThenElse {
         cond: Box<BoolExpr>,
-        body_then: Box<AST>,
-        body_else: Box<AST>,
+        body_then: Box<Statement>,
+        body_else: Box<Statement>,
     },
     While {
         cond: Box<BoolExpr>,
-        body: Box<AST>,
+        body: Box<Statement>,
     },
     DoWhile {
         cond: Box<BoolExpr>,
-        body: Box<AST>,
+        body: Box<Statement>,
     },
     Break,
     Continue,
     Nop,
+}
+
+impl ToString for Statement {
+    fn to_string(&self) -> String {
+        match self {
+            Statement::Compound { first, next } => format!("{}\n{}", first.to_string(), next.to_string()),
+            Statement::Original { node_num } => format!("node {};", node_num),
+            Statement::Assign { var, value } => format!("{} = {};", var, value.to_string()),
+            Statement::IfThen { cond, body_then } => format!(
+                "if ({}) {{\n{}\n}}",
+                cond.to_string(),
+                indent(&body_then.to_string())
+            ),
+            Statement::IfThenElse {
+                cond,
+                body_then,
+                body_else,
+            } => format!(
+                "if ({}) {{\n{}\n}} else {{\n{}\n}}",
+                cond.to_string(),
+                indent(&body_then.to_string()),
+                indent(&body_else.to_string())
+            ),
+            Statement::While { cond, body } => format!(
+                "while ({}) {{\n{}\n}}",
+                cond.to_string(),
+                indent(&body.to_string())
+            ),
+            Statement::DoWhile { cond, body } => format!(
+                "do {{\n{}\n}} while ({});",
+                indent(&body.to_string()),
+                cond.to_string()
+            ),
+            Statement::Break => format!("break;"),
+            Statement::Continue => format!("continue;"),
+            Statement::Nop => format!(";"),
+        }
+    }
+}
+
+fn indent(stmts: &str) -> String {
+    stmts.split("\n").map(|s| format!("\t{}", s)).join("\n")
 }
 
 #[derive(Debug, Clone)]
@@ -87,8 +131,12 @@ impl ToString for BoolExpr {
             BoolExpr::True => String::from("true"),
             BoolExpr::False => String::from("false"),
             BoolExpr::Not { value } => format!("(not {})", value.to_string()),
-            BoolExpr::Or { value1, value2 } => format!("(or {} {})", value1.to_string(), value2.to_string()),
-            BoolExpr::And { value1, value2 } => format!("(and {} {})", value1.to_string(), value2.to_string()),
+            BoolExpr::Or { value1, value2 } => {
+                format!("(or {} {})", value1.to_string(), value2.to_string())
+            }
+            BoolExpr::And { value1, value2 } => {
+                format!("(and {} {})", value1.to_string(), value2.to_string())
+            }
             BoolExpr::Eq { var, value } => format!("{} == {}", var, value.to_string()),
         }
     }
