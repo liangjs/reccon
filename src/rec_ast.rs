@@ -416,10 +416,6 @@ impl Simplifier {
         let new_node =
             Simplifier::replace_condition(graph, vec![handle, prev_cond], branch_attr, ast);
 
-        if handle_false == prev_cond || handle_true == prev_cond {
-            graph.add_edge(new_node, new_node);
-        }
-
         self.queue_add(graph, new_node);
         self.queue_add(graph, branch_merge);
         true
@@ -568,10 +564,6 @@ impl Simplifier {
         let (new_node1, new_node2) =
             Simplifier::replace_short_circuit(graph, old_nodes, branch_attr, ast1, ast2);
 
-        if br_next_false == prev_cond || br_next_true == prev_cond {
-            graph.add_edge(new_node2, new_node1);
-        }
-
         self.queue_add(graph, new_node1);
         self.queue_add(graph, new_node2);
         self.queue_add(graph, br_merge);
@@ -685,6 +677,9 @@ impl Simplifier {
             None => return false,
             Some(x) => x,
         };
+        if graph.reverse_edge_iter(cond).count() != 1 {
+            return false;
+        }
         let (br_false, br_true) = match graph.read_note(cond).branch_attr {
             BranchAttr::NotBranch => return false,
             BranchAttr::Branch(br_false, br_true) => (br_false, br_true),

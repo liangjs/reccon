@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use itertools::sorted;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -364,7 +365,7 @@ impl LoopNormalizer {
     fn abnormal_exits(&self, graph: &LoopGraph, head: usize) -> Vec<(usize, usize)> {
         let mut exits = Vec::new();
         let nodes = self.loop_nodes.get(&head).unwrap();
-        for x in nodes.iter() {
+        for x in sorted(nodes) {
             let x = *x;
             for y in graph.edge_iter(x) {
                 if !self.loop_nodes.get(&head).unwrap().contains(&y) {
@@ -379,7 +380,7 @@ impl LoopNormalizer {
     fn abnormal_entries(&self, graph: &LoopGraph, head: usize) -> Vec<(usize, usize)> {
         let mut entries = Vec::new();
         let nodes = self.loop_nodes.get(&head).unwrap();
-        for x in nodes.iter() {
+        for x in sorted(nodes) {
             let x = *x;
             if x == head {
                 continue;

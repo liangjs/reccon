@@ -19,6 +19,7 @@ fn main() {
     graph.add_edge(6, 8);
     graph.add_edge(7, 8);
     */
+    /*
     let mut graph: StaticGraph<String> = StaticGraph::new_from_default(5);
     graph.add_edge(0, 1);
     graph.add_edge(0, 3);
@@ -26,6 +27,11 @@ fn main() {
     graph.add_edge(2, 4);
     graph.add_edge(2, 0);
     graph.add_edge(3, 4);
+    */
+    //let graph: StaticGraph<String> =
+    //    StaticGraph::new(5, vec![(0, 1), (1, 2), (2, 0), (2, 3), (3, 1), (3, 4)]);
+    let graph: StaticGraph<String> =
+        StaticGraph::new(5, vec![(0, 1), (0, 3), (1, 2), (1, 4), (2, 1), (2, 3), (3, 2)]);
 
     let result = reccon::loop_structure(&graph, 0).unwrap();
     println!("entry: {}", result.entry);
