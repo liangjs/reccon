@@ -5,6 +5,8 @@ use std::collections::HashSet;
 use crate::ast::*;
 use crate::graph::*;
 
+const VAR_PREFIX: &str = "break_";
+
 pub struct LoopRecOutput {
     pub graph: StaticGraph<Single>,
     pub entry: usize,
@@ -414,7 +416,7 @@ impl LoopNormalizer {
         let outter_loop = graph.get_note_mut(head).loop_attr.outer;
 
         /* create new vars */
-        let c_var = format!("break_{}", head);
+        let c_var = format!("{}{}", VAR_PREFIX, head);
         self.new_vars.push(c_var.clone());
 
         /* node assgin c=-1 */
