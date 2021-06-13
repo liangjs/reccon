@@ -29,8 +29,11 @@ fn main() {
 
     let result = reccon::loop_structure(&graph, 0).unwrap();
     println!("entry: {}", result.entry);
-    println!("new vars: {:?}", result.new_vars);
+    println!("vars: {:?}", result.new_vars);
     reccon::graph::debug_print(&result.graph);
-
     reccon::graph::dot_graph(&result.graph, result.entry);
+
+    let result = reccon::reconstruct(&graph, 0).unwrap();
+    println!("vars: {:?}", result.new_vars);
+    println!("{}", result.stmt.to_string());
 }

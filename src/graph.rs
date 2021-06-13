@@ -17,6 +17,9 @@ pub trait Graph {
 
     /* iterator of edge endpoints from node */
     fn edge_iter<'a>(&'a self, node: usize) -> EdgeIter<'a>;
+
+    /* test if graph contains the node */
+    fn contain_node(&self, node: usize) -> bool;
 }
 
 pub trait NotedGraph: Graph {
@@ -94,6 +97,10 @@ impl<Note> Graph for StaticGraph<Note> {
     fn node_iter<'a>(&'a self) -> NodeIter<'a> {
         let n = self.node_num();
         Box::new(0..n)
+    }
+
+    fn contain_node(&self, node: usize) -> bool {
+        node < self.node_num()
     }
 }
 
@@ -282,6 +289,10 @@ impl<Note> Graph for EditableGraph<Note> {
     fn node_iter<'a>(&'a self) -> NodeIter<'a> {
         let iter = self.nodes.iter();
         Box::new(iter.map(|x| x.id))
+    }
+
+    fn contain_node(&self, node: usize) -> bool {
+        self.node_position.contains_key(&node)
     }
 }
 

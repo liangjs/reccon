@@ -17,6 +17,7 @@ pub struct ASTRecResult {
 pub fn ast_structure(graph: &dyn Graph, entry: usize) -> Option<ASTRecResult> {
     let mut ast_graph = construct_ast_graph(graph)?;
     let entry = add_entry(&mut ast_graph, entry);
+    add_halt(&mut ast_graph);
     let result = Simplifier::simplify(&mut ast_graph, entry)?;
     let ast = &ast_graph.read_note(result.node).ast;
     Some(ASTRecResult {
@@ -32,6 +33,17 @@ fn add_entry(graph: &mut ASTGraph, entry: usize) -> usize {
     ));
     graph.add_edge(new_entry, entry);
     new_entry
+}
+
+fn add_halt(graph: &mut ASTGraph) {
+    let nodes: Vec<usize> = graph.node_iter().collect();
+    for node in nodes.iter() {
+        let node = *node;
+        if graph.edge_iter(node).count() == 0 {
+            let halt = graph.add_node(NodeAttr::new_node(BranchAttr::NotBranch, AST::AState(Statement::Halt)));
+            graph.add_edge(node, halt);
+        }
+    }
 }
 
 fn construct_ast_graph(graph: &dyn Graph) -> Option<ASTGraph> {
@@ -76,8 +88,11 @@ struct NodeAttr {
 impl NodeAttr {
     pub fn new(origin: usize, branch_attr: BranchAttr) -> NodeAttr {
         NodeAttr {
-            branch_attr,
-            ast: AST::AState(Statement::Original { node_num: origin }),
+            branch_attr: branch_attr.clone(),
+            ast: match branch_attr {
+                BranchAttr::NotBranch => AST::AState(Statement::Original { node_num: origin }),
+                BranchAttr::Branch(_, _) => AST::ABool(BoolExpr::Original { node_num: origin }),
+            },
         }
     }
 
@@ -117,6 +132,7 @@ impl Simplifier {
             new_vars: Vec::new(),
         };
         state.dfs(graph, entry);
+        state.queue_reverse();
         state.simplify_all(graph);
         if graph.node_num() != 1 {
             return None;
@@ -141,19 +157,29 @@ impl Simplifier {
     }
 
     fn queue_add(&mut self, graph: &ASTGraph, node: usize) {
-        if graph.reverse_edge_iter(node).count() == 1 {
+        let rcount = graph.reverse_edge_iter(node).count();
+        if rcount == 1 {
             self.queue_1.push_front(node);
-        } else {
+        } else if rcount == 2 {
             self.queue_2.push_front(node);
         }
+    }
+
+    fn queue_reverse(&mut self) {
+        self.queue_1 = self.queue_1.iter().rev().map(|x| *x).collect();
+        self.queue_2 = self.queue_2.iter().rev().map(|x| *x).collect();
     }
 
     fn simplify_all(&mut self, graph: &mut ASTGraph) {
         loop {
             if let Some(node) = self.queue_1.pop_front() {
-                self.simplify_type_1(graph, node);
+                if graph.contain_node(node) {
+                    self.simplify_type_1(graph, node);
+                }
             } else if let Some(node) = self.queue_2.pop_front() {
-                self.simplify_type_2(graph, node);
+                if graph.contain_node(node) {
+                    self.simplify_type_2(graph, node);
+                }
             } else {
                 break;
             }
@@ -204,6 +230,7 @@ impl Simplifier {
             );
             true
         } else {
+            let next = graph.edge_iter(handle).next();
             let new_node = Simplifier::replace_block(
                 graph,
                 vec![handle, prev],
@@ -212,6 +239,9 @@ impl Simplifier {
                     next: Box::new(graph.read_note(handle).ast.clone_state()),
                 }),
             );
+            if next == Some(prev) {
+                graph.add_edge(new_node, new_node);
+            }
             self.queue_add(graph, new_node);
             true
         }
@@ -229,21 +259,43 @@ impl Simplifier {
             None => return false,
             Some(x) => x,
         };
+        let mut refresh_next = false;
         if let Some(next2) = graph.edge_iter(handle).next() {
             if next2 != next {
                 return false;
             }
+            refresh_next = true;
         }
+
+        let cond_expr = graph.read_note(cond).ast.clone_bool();
+        let (_br_false, br_true) = match graph.read_note(cond).branch_attr {
+            BranchAttr::NotBranch => return false,
+            BranchAttr::Branch(br_false, br_true) => (br_false, br_true),
+        };
 
         let new_node = Simplifier::replace_block(
             graph,
             vec![handle, cond],
             AST::AState(Statement::IfThen {
-                cond: Box::new(graph.read_note(cond).ast.clone_bool()),
+                cond: Box::new(if br_true == handle {
+                    cond_expr
+                } else {
+                    BoolExpr::Not {
+                        value: Box::new(cond_expr),
+                    }
+                }),
                 body_then: Box::new(graph.read_note(handle).ast.clone_state()),
             }),
         );
+
+        if next == cond {
+            graph.add_edge(new_node, new_node);
+        }
+
         self.queue_add(graph, new_node);
+        if refresh_next {
+            self.queue_add(graph, next);
+        }
         true
     }
 
@@ -286,7 +338,15 @@ impl Simplifier {
                 body_else: Box::new(graph.read_note(br_false).ast.clone_state()),
             }),
         );
+
+        if next == Some(cond) {
+            graph.add_edge(new_node, new_node);
+        }
+
         self.queue_add(graph, new_node);
+        if let Some(next) = next {
+            self.queue_add(graph, next);
+        }
         true
     }
 
@@ -355,7 +415,13 @@ impl Simplifier {
         });
         let new_node =
             Simplifier::replace_condition(graph, vec![handle, prev_cond], branch_attr, ast);
+
+        if handle_false == prev_cond || handle_true == prev_cond {
+            graph.add_edge(new_node, new_node);
+        }
+
         self.queue_add(graph, new_node);
+        self.queue_add(graph, branch_merge);
         true
     }
 
@@ -485,7 +551,7 @@ impl Simplifier {
             }
         };
 
-        /* 
+        /*
          *  if (prev) { mid1; p = true; }
          *  else { mid2; p = next; }
          *  if (p) { ... } else { ... }
@@ -501,8 +567,14 @@ impl Simplifier {
 
         let (new_node1, new_node2) =
             Simplifier::replace_short_circuit(graph, old_nodes, branch_attr, ast1, ast2);
+
+        if br_next_false == prev_cond || br_next_true == prev_cond {
+            graph.add_edge(new_node2, new_node1);
+        }
+
         self.queue_add(graph, new_node1);
         self.queue_add(graph, new_node2);
+        self.queue_add(graph, br_merge);
         self.new_vars.push(p_var);
         true
     }
@@ -512,6 +584,9 @@ impl Simplifier {
             return;
         }
         if self.try_do_while(graph, handle) {
+            return;
+        }
+        if self.try_dumb_loop(graph, handle) {
             return;
         }
     }
@@ -524,6 +599,9 @@ impl Simplifier {
         let test_next = |node| {
             let nexts: Vec<usize> = graph.edge_iter(node).collect();
             if nexts.len() != 1 {
+                return false;
+            }
+            if graph.reverse_edge_iter(node).count() != 1 {
                 return false;
             }
             *nexts.first().unwrap() == head
@@ -675,6 +753,51 @@ impl Simplifier {
         true
     }
 
+    fn try_dumb_loop(&mut self, graph: &mut ASTGraph, handle: usize) -> bool {
+        if is_branch(graph, handle) {
+            return false;
+        }
+        let next_tmp = match graph.edge_iter(handle).next() {
+            None => return false,
+            Some(x) => x,
+        };
+        let next = if next_tmp == handle {
+            None
+        } else {
+            if graph.reverse_edge_iter(next_tmp).count() != 1 {
+                return false;
+            }
+            if graph.edge_iter(next_tmp).count() != 1 {
+                return false;
+            }
+            if graph.edge_iter(next_tmp).next() != Some(handle) {
+                return false;
+            }
+            Some(next_tmp)
+        };
+
+        let mut old_nodes = vec![handle];
+        if let Some(x) = next {
+            old_nodes.push(x);
+        }
+
+        let handle_stmt = graph.read_note(handle).ast.clone_state();
+        let ast = AST::AState(Statement::While {
+            cond: Box::new(BoolExpr::True),
+            body: Box::new(match next {
+                None => handle_stmt,
+                Some(next) => Statement::Compound {
+                    first: Box::new(handle_stmt),
+                    next: Box::new(graph.read_note(next).ast.clone_state()),
+                },
+            }),
+        });
+
+        let new_node = Simplifier::replace_block(graph, old_nodes, ast);
+        self.queue_add(graph, new_node);
+        true
+    }
+
     fn replace_in_edges(graph: &mut ASTGraph, old_nodes: &Vec<usize>, node: usize) {
         let old_nodes: HashSet<usize> = HashSet::from_iter(old_nodes.clone());
         for old in old_nodes.iter() {
@@ -705,6 +828,9 @@ impl Simplifier {
             }
         }
         /* add out edges */
+        if all_nexts.len() == 0 {
+            return;
+        }
         if all_nexts.len() != 1 {
             panic!("Block has many outgoing edges.");
         }

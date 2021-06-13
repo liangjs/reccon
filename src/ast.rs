@@ -35,6 +35,7 @@ pub enum Statement {
     Break,
     Continue,
     Nop,
+    Halt,
 }
 
 impl ToString for Statement {
@@ -73,6 +74,7 @@ impl ToString for Statement {
             Statement::Break => format!("break;"),
             Statement::Continue => format!("continue;"),
             Statement::Nop => format!(";"),
+            Statement::Halt => format!("halt;"),
         }
     }
 }
@@ -115,12 +117,12 @@ impl ToString for BoolExpr {
             BoolExpr::Var { name } => name.clone(),
             BoolExpr::True => String::from("true"),
             BoolExpr::False => String::from("false"),
-            BoolExpr::Not { value } => format!("(not {})", value.to_string()),
+            BoolExpr::Not { value } => format!("not ({})", value.to_string()),
             BoolExpr::Or { value1, value2 } => {
-                format!("(or {} {})", value1.to_string(), value2.to_string())
+                format!("or ({}) ({})", value1.to_string(), value2.to_string())
             }
             BoolExpr::And { value1, value2 } => {
-                format!("(and {} {})", value1.to_string(), value2.to_string())
+                format!("and ({}) ({})", value1.to_string(), value2.to_string())
             }
             BoolExpr::Eq { var, value } => format!("{} == {}", var, value.to_string()),
         }
@@ -212,6 +214,7 @@ impl Statement {
             Statement::Break => self.clone(),
             Statement::Continue => self.clone(),
             Statement::Nop => self.clone(),
+            Statement::Halt => self.clone(),
         }
     }
 }

@@ -77,7 +77,7 @@ fn construct_branch_attr(graph: &dyn Graph, id: usize) -> Option<BranchAttr> {
 fn construct_out_graph(graph: &LoopGraph) -> StaticGraph<AST> {
     let mut out_graph = StaticGraph::new_empty();
     for x in graph.node_iter() {
-        out_graph.add_node(graph.read_note(x).expr.clone());
+        out_graph.add_node(graph.read_note(x).ast.clone());
     }
     for x in graph.node_iter() {
         let mut edges: Vec<usize> = graph.edge_iter(x).collect();
@@ -96,7 +96,7 @@ fn construct_out_graph(graph: &LoopGraph) -> StaticGraph<AST> {
 struct NodeAttr {
     loop_attr: LoopAttr,
     branch_attr: BranchAttr,
-    expr: AST,
+    ast: AST,
 }
 
 #[derive(Debug, Clone)]
@@ -122,12 +122,15 @@ impl NodeAttr {
                 inner: usize::MAX,
                 outer: usize::MAX,
             },
-            branch_attr,
-            expr: AST::AState(Statement::Original { node_num: origin }),
+            branch_attr: branch_attr.clone(),
+            ast: match branch_attr {
+                BranchAttr::NotBranch => AST::AState(Statement::Original { node_num: origin }),
+                BranchAttr::Branch(_, _) => AST::ABool(BoolExpr::Original { node_num: origin }),
+            },
         }
     }
 
-    pub fn new_node(inner_loop: usize, branch_attr: BranchAttr, expr: AST) -> NodeAttr {
+    pub fn new_node(inner_loop: usize, branch_attr: BranchAttr, ast: AST) -> NodeAttr {
         NodeAttr {
             loop_attr: LoopAttr {
                 is_head: false,
@@ -136,7 +139,7 @@ impl NodeAttr {
                 outer: usize::MAX,
             }, // not used
             branch_attr,
-            expr,
+            ast,
         }
     }
 }
