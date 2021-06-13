@@ -8,7 +8,7 @@ use crate::graph::*;
 const VAR_PREFIX: &str = "break_";
 
 pub struct LoopRecOutput {
-    pub graph: StaticGraph<Single>,
+    pub graph: StaticGraph<AST>,
     pub entry: usize,
     pub new_vars: Vec<String>,
 }
@@ -74,7 +74,7 @@ fn construct_branch_attr(graph: &dyn Graph, id: usize) -> Option<BranchAttr> {
     }
 }
 
-fn construct_out_graph(graph: &LoopGraph) -> StaticGraph<Single> {
+fn construct_out_graph(graph: &LoopGraph) -> StaticGraph<AST> {
     let mut out_graph = StaticGraph::new_empty();
     for x in graph.node_iter() {
         out_graph.add_node(graph.read_note(x).expr.clone());
@@ -96,7 +96,7 @@ fn construct_out_graph(graph: &LoopGraph) -> StaticGraph<Single> {
 struct NodeAttr {
     loop_attr: LoopAttr,
     branch_attr: BranchAttr,
-    expr: Single,
+    expr: AST,
 }
 
 #[derive(Debug, Clone)]
@@ -123,11 +123,11 @@ impl NodeAttr {
                 outer: usize::MAX,
             },
             branch_attr,
-            expr: Single::Original { node_num: origin },
+            expr: AST::AState(Statement::Original { node_num: origin }),
         }
     }
 
-    pub fn new_node(inner_loop: usize, branch_attr: BranchAttr, expr: Single) -> NodeAttr {
+    pub fn new_node(inner_loop: usize, branch_attr: BranchAttr, expr: AST) -> NodeAttr {
         NodeAttr {
             loop_attr: LoopAttr {
                 is_head: false,
@@ -423,10 +423,10 @@ impl LoopNormalizer {
         let c_assign_init = graph.add_node(NodeAttr::new_node(
             outter_loop,
             BranchAttr::NotBranch,
-            Single::Assign {
+            AST::AState(Statement::Assign {
                 var: c_var.clone(),
                 value: Box::new(Expr::Int(-1)),
-            },
+            }),
         ));
         self.loop_add_node(graph, c_assign_init);
         if self.entry == head {
@@ -441,10 +441,10 @@ impl LoopNormalizer {
             let c_cond = graph.add_node(NodeAttr::new_node(
                 outter_loop,
                 BranchAttr::Branch(out_node, out_i),
-                Single::Condition(Box::new(BoolExpr::Eq {
+                AST::ABool(BoolExpr::Eq {
                     var: c_var.clone(),
                     value: Box::new(Expr::Int(i as i32)),
-                })),
+                }),
             ));
             self.loop_add_node(graph, c_cond);
             graph.add_edge(c_cond, out_node);
@@ -456,10 +456,10 @@ impl LoopNormalizer {
         let c_cond = graph.add_node(NodeAttr::new_node(
             head,
             BranchAttr::Branch(out_node, head),
-            Single::Condition(Box::new(BoolExpr::Eq {
+            AST::ABool(BoolExpr::Eq {
                 var: c_var.clone(),
                 value: Box::new(Expr::Int(-1)),
-            })),
+            }),
         ));
         self.loop_add_node(graph, c_cond);
         /* edge c_assign_init->c_cond */
@@ -474,10 +474,10 @@ impl LoopNormalizer {
             let c_assign = graph.add_node(NodeAttr::new_node(
                 head,
                 BranchAttr::NotBranch,
-                Single::Assign {
+                AST::AState(Statement::Assign {
                     var: c_var.clone(),
                     value: Box::new(Expr::Int(i as i32)),
-                },
+                }),
             ));
             self.loop_add_node(graph, c_assign);
             /* exit_node->c_assign->c_cond */
@@ -506,10 +506,10 @@ impl LoopNormalizer {
             let c_assign_init = graph.add_node(NodeAttr::new_node(
                 LoopNormalizer::common_loop(graph, head, prev),
                 BranchAttr::NotBranch,
-                Single::Assign {
+                AST::AState(Statement::Assign {
                     var: c_var.clone(),
                     value: Box::new(Expr::Int(-1)),
-                },
+                }),
             ));
             self.loop_add_node(graph, c_assign_init);
             /* change edges prev->ent to prev->b_assign_true->ent */

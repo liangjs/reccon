@@ -68,28 +68,6 @@ enum BranchAttr {
     Branch(usize, usize), // (false_branch, true_branch)
 }
 
-#[derive(Debug, Clone)]
-enum AST {
-    AState(Statement),
-    ABool(BoolExpr),
-}
-
-impl AST {
-    pub fn clone_state(&self) -> Statement {
-        match self {
-            AST::AState(x) => x.clone(),
-            AST::ABool(_) => panic!("AST is not statement."),
-        }
-    }
-
-    pub fn clone_bool(&self) -> BoolExpr {
-        match self {
-            AST::AState(_) => panic!("AST is not bool expression."),
-            AST::ABool(x) => x.clone(),
-        }
-    }
-}
-
 struct NodeAttr {
     branch_attr: BranchAttr,
     ast: AST,
@@ -473,16 +451,16 @@ impl Simplifier {
         let p_var = format!("{}{}", VAR_PREFIX, prev_cond);
         let p_assign_true = Statement::Assign {
             var: p_var.clone(),
-            value: Box::new(BoolExpr::True),
+            value: Box::new(Expr::Bool(BoolExpr::True)),
         };
         let p_assign = Statement::Assign {
             var: p_var.clone(),
             value: Box::new(if br_merge == br_next_true {
-                next_cond_expr
+                Expr::Bool(next_cond_expr)
             } else {
-                BoolExpr::Not {
+                Expr::Bool(BoolExpr::Not {
                     value: Box::new(next_cond_expr),
-                }
+                })
             }),
         };
         let prev_pass_stmt = match mid1 {
@@ -507,6 +485,11 @@ impl Simplifier {
             }
         };
 
+        /* 
+         *  if (prev) { mid1; p = true; }
+         *  else { mid2; p = next; }
+         *  if (p) { ... } else { ... }
+         */
         let ast1 = AST::AState(Statement::IfThenElse {
             cond: Box::new(prev_pass_cond),
             body_then: Box::new(prev_pass_stmt),
@@ -605,6 +588,7 @@ impl Simplifier {
             Some(next) => graph.read_note(next).ast.clone_state(),
         };
 
+        /* while (cond) { handle; } */
         let ast = AST::AState(Statement::While {
             cond: Box::new(loop_cond),
             body: Box::new(body_stmt),
@@ -665,10 +649,12 @@ impl Simplifier {
 
         let handle_stmt = graph.read_note(handle).ast.clone_state();
         let ast = match next {
+            /* do { handle; } while (cond); */
             None => AST::AState(Statement::DoWhile {
                 cond: Box::new(loop_cond),
                 body: Box::new(handle_stmt),
             }),
+            /* while (true) { handle; if (cond) break; next; } */
             Some(next) => AST::AState(Statement::While {
                 cond: Box::new(BoolExpr::True),
                 body: Box::new(Statement::Compound {
