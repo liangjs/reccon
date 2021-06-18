@@ -1,9 +1,13 @@
-use itertools::Itertools;
+use itertools::enumerate;
 use itertools::sorted;
+use itertools::Itertools;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
+use std::usize;
 
 use crate::ast::*;
+use crate::graph;
 use crate::graph::*;
 
 const VAR_PREFIX: &str = "break_";
@@ -31,6 +35,7 @@ pub fn loop_structure(graph: &dyn Graph, entry: usize) -> Option<LoopRecOutput> 
     LoopMarker::mark(&mut loop_graph, entry);
     //println!("===== mark2");
     //debug_print(&loop_graph);
+    //dot_graph(&loop_graph, entry);
 
     let NormalizeResult {
         entry,
@@ -38,6 +43,7 @@ pub fn loop_structure(graph: &dyn Graph, entry: usize) -> Option<LoopRecOutput> 
     } = LoopNormalizer::normalize_entry(&mut loop_graph, entry);
     //println!("===== normal entry");
     //debug_print(&loop_graph);
+    //dot_graph(&loop_graph, entry);
 
     let out_graph = construct_out_graph(&loop_graph);
     let mut new_vars = new_vars1;
@@ -77,17 +83,21 @@ fn construct_branch_attr(graph: &dyn Graph, id: usize) -> Option<BranchAttr> {
 
 fn construct_out_graph(graph: &LoopGraph) -> StaticGraph<AST> {
     let mut out_graph = StaticGraph::new_empty();
+    let mut node_map: HashMap<usize, usize> = HashMap::new();
     for x in graph.node_iter() {
-        out_graph.add_node(graph.read_note(x).ast.clone());
+        let map_x = out_graph.add_node(graph.read_note(x).ast.clone());
+        node_map.insert(x, map_x);
     }
     for x in graph.node_iter() {
         let mut edges: Vec<usize> = graph.edge_iter(x).collect();
+        let map_x = *node_map.get(&x).unwrap();
         if let BranchAttr::Branch(br_false, br_true) = graph.read_note(x).branch_attr {
             edges = vec![br_false, br_true];
         }
         for y in edges.iter() {
             let y = *y;
-            out_graph.add_edge(x, y);
+            let map_y = *node_map.get(&y).unwrap();
+            out_graph.add_edge(map_x, map_y);
         }
     }
     out_graph
@@ -98,6 +108,12 @@ struct NodeAttr {
     loop_attr: LoopAttr,
     branch_attr: BranchAttr,
     ast: AST,
+}
+
+impl ToString for NodeAttr {
+    fn to_string(&self) -> String {
+        self.ast.to_string()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -151,6 +167,7 @@ struct LoopMarker {
     visited: Vec<usize>,
     processed: Vec<usize>,
     in_stack: Vec<bool>,
+    node_map: HashMap<usize, usize>,
     dfn: usize,
     entry: usize,
 }
@@ -162,9 +179,13 @@ impl LoopMarker {
             visited: vec![0; n],
             in_stack: vec![false; n],
             processed: vec![usize::MAX; n],
+            node_map: HashMap::new(),
             dfn: 0,
             entry,
         };
+        for (i, node) in enumerate(graph.node_iter()) {
+            state.node_map.insert(node, i);
+        }
         LoopMarker::clean_loop_attr(graph);
         state.dfs(graph, entry);
         state.visited = vec![0; n];
@@ -184,12 +205,18 @@ impl LoopMarker {
     }
 
     fn dfs(&mut self, graph: &mut LoopGraph, current: usize) {
-        self.visited[current] = 1;
-        self.in_stack[current] = true;
-        let nexts: Vec<usize> = graph.edge_iter(current).collect();
+        let mapped_current = *self.node_map.get(&current).unwrap();
+        self.visited[mapped_current] = 1;
+        self.in_stack[mapped_current] = true;
+        // TODO: order
+        let nexts: Vec<usize> = match graph.read_note(current).branch_attr {
+            BranchAttr::NotBranch => graph.edge_iter(current).collect(),
+            BranchAttr::Branch(br_false, br_true) => vec![br_true, br_false],
+        };
         for next in nexts {
-            if self.visited[next] != 0 {
-                if self.in_stack[next] {
+            let mapped_next = *self.node_map.get(&next).unwrap();
+            if self.visited[mapped_next] != 0 {
+                if self.in_stack[mapped_next] {
                     /* loop-back edge */
                     graph.get_note_mut(next).loop_attr.is_head = true;
                 } else {
@@ -199,7 +226,7 @@ impl LoopMarker {
                 self.dfs(graph, next);
             }
         }
-        self.in_stack[current] = false;
+        self.in_stack[mapped_current] = false;
         graph.get_note_mut(current).loop_attr.level = self.dfn;
         self.dfn += 1;
     }
@@ -210,8 +237,9 @@ impl LoopMarker {
         }
         let nexts: Vec<usize> = graph.edge_iter(current).collect();
         for next in nexts {
-            self.visited[next] += 1;
-            if self.visited[next] == 1 {
+            let mapped_next = *self.node_map.get(&next).unwrap();
+            self.visited[mapped_next] += 1;
+            if self.visited[mapped_next] == 1 {
                 self.mark_range(graph, next);
             }
         }
@@ -221,6 +249,7 @@ impl LoopMarker {
         if graph.read_note(current).loop_attr.inner == head {
             return;
         }
+        let mapped_current = *self.node_map.get(&current).unwrap();
 
         let mut mark_current = false;
         let mut decide_next = false;
@@ -231,11 +260,11 @@ impl LoopMarker {
                 LoopMarker::set_loop(graph, current, head);
                 decide_next = true;
             } else {
-                if (self.visited[current] == 0 && current != self.entry)
-                    || self.visited[current] == graph.reverse_edge_iter(current).count()
+                if (self.visited[mapped_current] == 0 && current != self.entry)
+                    || self.visited[mapped_current] == graph.reverse_edge_iter(current).count()
                 {
-                    if self.processed[current] != head {
-                        self.processed[current] = head;
+                    if self.processed[mapped_current] != head {
+                        self.processed[mapped_current] = head;
                         decide_next = true;
                     }
                 }
@@ -412,10 +441,10 @@ impl LoopNormalizer {
         let n = exits.len();
 
         /* already normalized */
-        let exits_num = exits.iter().map(|x| x.1).unique().count();
-        if exits_num <= 1 {
+        if exits.len() <= 1 {
             return;
         }
+        let exits_num = exits.iter().map(|x| x.1).unique().count();
 
         let outter_loop = graph.get_note_mut(head).loop_attr.outer;
 
@@ -439,21 +468,23 @@ impl LoopNormalizer {
 
         /* the branches after loop */
         let mut out_node = exits[n - 1].1;
-        for i in (0..n - 1).rev() {
-            let out_i = exits[i].1;
-            /* if (c==i) out_i else out_node */
-            let c_cond = graph.add_node(NodeAttr::new_node(
-                outter_loop,
-                BranchAttr::Branch(out_node, out_i),
-                AST::ABool(BoolExpr::Eq {
-                    var: c_var.clone(),
-                    value: Box::new(Expr::Int(i as i32)),
-                }),
-            ));
-            self.loop_add_node(graph, c_cond);
-            graph.add_edge(c_cond, out_node);
-            graph.add_edge(c_cond, out_i);
-            out_node = c_cond;
+        if exits_num > 1 {
+            for i in (0..n - 1).rev() {
+                let out_i = exits[i].1;
+                /* if (c==i) out_i else out_node */
+                let c_cond = graph.add_node(NodeAttr::new_node(
+                    outter_loop,
+                    BranchAttr::Branch(out_node, out_i),
+                    AST::ABool(BoolExpr::Eq {
+                        var: c_var.clone(),
+                        value: Box::new(Expr::Int(i as i32)),
+                    }),
+                ));
+                self.loop_add_node(graph, c_cond);
+                graph.add_edge(c_cond, out_node);
+                graph.add_edge(c_cond, out_i);
+                out_node = c_cond;
+            }
         }
 
         /* loop condition */
@@ -543,11 +574,12 @@ impl LoopNormalizer {
             let dup_ent = self.duplicate_nodes(graph, head, &mut dup_nodes, ent);
             /* change prev->ent to prev->dup_ent */
             replace_edge_dest(graph, prev, ent, dup_ent);
+            clean_orphan(graph, ent);
         }
     }
 
     fn duplicate_nodes(
-        &self,
+        &mut self,
         graph: &mut LoopGraph,
         head: usize,
         dup_nodes: &mut HashMap<usize, usize>,
@@ -571,6 +603,7 @@ impl LoopNormalizer {
         /* duplicate node */
         let dup = graph.add_node(graph.read_note(node).clone());
         dup_nodes.insert(node, dup);
+        self.loop_add_node(graph, dup);
 
         /* duplicate edges */
         let nexts: Vec<usize> = graph.edge_iter(node).collect();
@@ -607,5 +640,20 @@ fn replace_edge_dest(graph: &mut LoopGraph, id_from: usize, id_to_old: usize, id
         if br_false == id_to_old {
             attr.branch_attr = BranchAttr::Branch(id_to_new, br_true);
         }
+    }
+}
+
+
+fn clean_orphan(graph: &mut LoopGraph, start: usize) {
+    let mut que: VecDeque<usize> = VecDeque::new();
+    que.push_back(start);
+    while let Some(node) = que.pop_front() {
+        if graph.reverse_edge_iter(node).count() > 0 {
+            continue;
+        }
+        for next in graph.edge_iter(node) {
+            que.push_back(next);
+        }
+        graph.del_node(node);
     }
 }

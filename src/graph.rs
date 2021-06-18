@@ -345,17 +345,17 @@ pub fn dot_graph<Note: ToString>(graph: &dyn NotedGraph<Note = Note>, entry: usi
     println!("entry -> {}", entry);
     for x in graph.node_iter() {
         let edges: Vec<usize> = graph.edge_iter(x).collect();
-        for y in edges.iter() {
-            let attr;
-            if edges.len() == 1 {
-                attr = "color=black";
+        for i in 0..edges.len() {
+            let y = edges[i];
+            let attr = if edges.len() == 1 {
+                "color=black"
             } else {
-                if y == edges.first().unwrap() {
-                    attr = "color=red";
+                if i == 0 {
+                    "color=red"
                 } else {
-                    attr = "color=blue";
+                    "color=blue"
                 }
-            }
+            };
             println!("{} -> {} [{}]", x, y, attr);
         }
     }
