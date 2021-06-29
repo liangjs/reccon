@@ -7,7 +7,6 @@ use std::collections::VecDeque;
 use std::usize;
 
 use crate::ast::*;
-use crate::graph;
 use crate::graph::*;
 
 const VAR_PREFIX: &str = "break_";
@@ -165,7 +164,6 @@ type LoopGraph = EditableGraph<NodeAttr>;
 
 struct LoopMarker {
     visited: Vec<usize>,
-    processed: Vec<usize>,
     in_stack: Vec<bool>,
     node_map: HashMap<usize, usize>,
     dfn: usize,
@@ -178,7 +176,6 @@ impl LoopMarker {
         let mut state = LoopMarker {
             visited: vec![0; n],
             in_stack: vec![false; n],
-            processed: vec![usize::MAX; n],
             node_map: HashMap::new(),
             dfn: 0,
             entry,
@@ -189,6 +186,7 @@ impl LoopMarker {
         LoopMarker::clean_loop_attr(graph);
         state.dfs(graph, entry);
         state.visited = vec![0; n];
+        state.in_stack = vec![false; n];
         LoopMarker::mark_range(&mut state, graph, entry);
     }
 
@@ -211,7 +209,7 @@ impl LoopMarker {
         // TODO: order
         let nexts: Vec<usize> = match graph.read_note(current).branch_attr {
             BranchAttr::NotBranch => graph.edge_iter(current).collect(),
-            BranchAttr::Branch(br_false, br_true) => vec![br_true, br_false],
+            BranchAttr::Branch(br_false, br_true) => vec![br_false, br_true],
         };
         for next in nexts {
             let mapped_next = *self.node_map.get(&next).unwrap();
@@ -232,59 +230,57 @@ impl LoopMarker {
     }
 
     fn mark_range(&mut self, graph: &mut LoopGraph, current: usize) {
+        let mapped_current = *self.node_map.get(&current).unwrap();
+        self.in_stack[mapped_current] = true;
         if graph.read_note(current).loop_attr.is_head {
-            self.mark_range_helper(graph, current, current);
+            self.mark_range_helper(graph, current);
         }
-        let nexts: Vec<usize> = graph.edge_iter(current).collect();
+        // TODO: order
+        let nexts: Vec<usize> = match graph.read_note(current).branch_attr {
+            BranchAttr::NotBranch => graph.edge_iter(current).collect(),
+            BranchAttr::Branch(br_false, br_true) => vec![br_false, br_true],
+        };
         for next in nexts {
             let mapped_next = *self.node_map.get(&next).unwrap();
             self.visited[mapped_next] += 1;
-            if self.visited[mapped_next] == 1 {
+            if self.visited[mapped_next] == 1 && next != self.entry {
                 self.mark_range(graph, next);
             }
         }
+        self.in_stack[mapped_current] = false;
     }
 
-    fn mark_range_helper(&mut self, graph: &mut LoopGraph, current: usize, head: usize) {
-        if graph.read_note(current).loop_attr.inner == head {
-            return;
-        }
-        let mapped_current = *self.node_map.get(&current).unwrap();
-
-        let mut mark_current = false;
-        let mut decide_next = false;
-
-        if graph.read_note(current).loop_attr.is_head {
-            if current == head {
-                mark_current = true;
-                LoopMarker::set_loop(graph, current, head);
-                decide_next = true;
-            } else {
-                if (self.visited[mapped_current] == 0 && current != self.entry)
-                    || self.visited[mapped_current] == graph.reverse_edge_iter(current).count()
-                {
-                    if self.processed[mapped_current] != head {
-                        self.processed[mapped_current] = head;
-                        decide_next = true;
+    fn mark_range_helper(&mut self, graph: &mut LoopGraph, head: usize) {
+        let flood_fill = |foward| {
+            let mut queued: HashSet<usize> = HashSet::new();
+            let mut queue: VecDeque<usize> = VecDeque::new();
+            queue.push_back(head);
+            queued.insert(head);
+            while let Some(node) = queue.pop_front() {
+                let nexts: Vec<usize> = if foward {
+                    graph.edge_iter(node).collect()
+                } else {
+                    graph.reverse_edge_iter(node).collect()
+                };
+                for next in nexts {
+                    let mapped_next = *self.node_map.get(&next).unwrap();
+                    if queued.contains(&next) {
+                        continue;
                     }
+                    if self.in_stack[mapped_next] {
+                        continue;
+                    }
+                    queue.push_back(next);
+                    queued.insert(next);
                 }
             }
-        } else {
-            decide_next = true;
-        }
-
-        if decide_next {
-            let nexts: Vec<usize> = graph.edge_iter(current).collect();
-            for next in nexts {
-                self.mark_range_helper(graph, next, head);
-                if graph.read_note(next).loop_attr.inner == head {
-                    mark_current = true;
-                }
-            }
-        }
-
-        if mark_current && current != head {
-            LoopMarker::set_loop(graph, current, head);
+            queued
+        };
+        let fill_backward = flood_fill(false);
+        let fill_forward = flood_fill(true);
+        let intersect = fill_backward.intersection(&fill_forward);
+        for node in intersect {
+            LoopMarker::set_loop(graph, *node, head);
         }
     }
 
@@ -642,7 +638,6 @@ fn replace_edge_dest(graph: &mut LoopGraph, id_from: usize, id_to_old: usize, id
         }
     }
 }
-
 
 fn clean_orphan(graph: &mut LoopGraph, start: usize) {
     let mut que: VecDeque<usize> = VecDeque::new();

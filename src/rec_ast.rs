@@ -18,12 +18,12 @@ pub fn ast_structure(graph: &dyn Graph, entry: usize) -> Option<ASTRecResult> {
     let mut ast_graph = construct_ast_graph(graph)?;
     let entry = add_entry(&mut ast_graph, entry);
     add_halt(&mut ast_graph);
-    dot_graph(&ast_graph, entry);
+    //dot_graph(&ast_graph, entry);
     let mut new_vars = Vec::new();
     loop {
         let result = Simplifier::simplify(&mut ast_graph, entry);
         new_vars.extend(result.new_vars);
-        dot_graph(&ast_graph, entry);
+        //dot_graph(&ast_graph, entry);
         if ast_graph.node_num() == 1 {
             break;
         }
@@ -183,7 +183,6 @@ impl Simplifier {
             if !graph.contain_node(node) {
                 continue;
             }
-            dbg!(node, graph.read_note(node).ast.to_string());
             if self.simplify_one(graph, node) {
                 updated = true;
             }
