@@ -215,6 +215,9 @@ impl Simplifier {
         if self.try_short_circuit(graph, handle) {
             return true;
         }
+        if self.try_dump_if(graph, handle) {
+            return true;
+        }
         false
     }
 
@@ -366,6 +369,35 @@ impl Simplifier {
         if let Some(next) = next {
             self.queue_add(next);
         }
+        true
+    }
+
+    fn try_dump_if(&mut self, graph: &mut ASTGraph, handle: usize) -> bool {
+        let cond = handle;
+        let branch = match graph.read_note(cond).branch_attr {
+            BranchAttr::NotBranch => return false,
+            BranchAttr::Branch(br_false, br_true) => {
+                if br_false == br_true {
+                    br_true
+                }
+                else {
+                    return false;
+                }
+            },
+        };
+
+        if graph.reverse_edge_iter(branch).count() != 2 {
+            return false;
+        }
+
+        let new_node = Simplifier::replace_block(graph, vec![cond], AST::AState(
+            Statement::IfThen {
+                cond: Box::new(graph.read_note(cond).ast.clone_bool()),
+                body_then: Box::new(Statement::Nop),
+            }
+        ));
+
+        self.queue_add(new_node);
         true
     }
 

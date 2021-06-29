@@ -10,3 +10,4 @@ edition = "2018"
 
 intrusive-collections = "0.9.1"
 itertools = "0.10.1"
+rand = "0.8.4"
