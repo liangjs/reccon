@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Statement {
     Compound {
         first: Box<Statement>,
@@ -83,7 +83,7 @@ fn indent(stmts: &str) -> String {
     stmts.split("\n").map(|s| format!("\t{}", s)).join("\n")
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum BoolExpr {
     Original {
         node_num: usize,
@@ -110,6 +110,17 @@ pub enum BoolExpr {
     },
 }
 
+impl BoolExpr {
+    pub fn from_bool(b: bool) -> BoolExpr {
+        if b {
+            BoolExpr::True
+        }
+        else {
+            BoolExpr::False
+        }
+    }
+}
+
 impl ToString for BoolExpr {
     fn to_string(&self) -> String {
         match self {
@@ -129,7 +140,7 @@ impl ToString for BoolExpr {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Expr {
     Bool(BoolExpr),
     Int(i32),
@@ -144,7 +155,7 @@ impl ToString for Expr {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum AST {
     AState(Statement),
     ABool(BoolExpr),

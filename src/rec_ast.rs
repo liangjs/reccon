@@ -154,7 +154,10 @@ impl Simplifier {
         state.dfs(graph, entry);
         state.queue_reverse();
         let updated = state.simplify_all(graph);
-        SimplifyResult { updated, new_vars: state.new_vars }
+        SimplifyResult {
+            updated,
+            new_vars: state.new_vars,
+        }
     }
 
     fn dfs(&mut self, graph: &mut ASTGraph, current: usize) {
@@ -191,6 +194,9 @@ impl Simplifier {
     }
 
     fn simplify_one(&mut self, graph: &mut ASTGraph, handle: usize) -> bool {
+        if self.try_dump_if(graph, handle) {
+            return true;
+        }
         if self.try_while(graph, handle) {
             return true;
         }
@@ -213,9 +219,6 @@ impl Simplifier {
             return true;
         }
         if self.try_short_circuit(graph, handle) {
-            return true;
-        }
-        if self.try_dump_if(graph, handle) {
             return true;
         }
         false
@@ -374,28 +377,28 @@ impl Simplifier {
 
     fn try_dump_if(&mut self, graph: &mut ASTGraph, handle: usize) -> bool {
         let cond = handle;
-        let branch = match graph.read_note(cond).branch_attr {
+        let next = match graph.read_note(cond).branch_attr {
             BranchAttr::NotBranch => return false,
             BranchAttr::Branch(br_false, br_true) => {
-                if br_false == br_true {
-                    br_true
-                }
-                else {
+                if br_false != br_true {
                     return false;
                 }
-            },
+                br_true
+            }
         };
 
-        if graph.reverse_edge_iter(branch).count() != 2 {
-            return false;
-        }
-
-        let new_node = Simplifier::replace_block(graph, vec![cond], AST::AState(
-            Statement::IfThen {
+        let new_node = Simplifier::replace_block(
+            graph,
+            vec![cond],
+            AST::AState(Statement::IfThen {
                 cond: Box::new(graph.read_note(cond).ast.clone_bool()),
                 body_then: Box::new(Statement::Nop),
-            }
-        ));
+            }),
+        );
+
+        if next == handle {
+            graph.add_edge(new_node, new_node);
+        }
 
         self.queue_add(new_node);
         true
