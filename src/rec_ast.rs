@@ -477,71 +477,81 @@ impl Simplifier {
 
     fn try_short_circuit(&mut self, graph: &mut ASTGraph, handle: usize) -> bool {
         let prev_cond = handle;
-        let (br_prev_false, br_prev_true) = match graph.read_note(prev_cond).branch_attr {
-            BranchAttr::NotBranch => return false,
+        if !is_branch(graph, handle) {
+            return false;
+        }
+
+        let check_mid = |m| match m {
+            None => true,
+            Some(m) => graph.reverse_edge_iter(m).count() == 1 && !is_branch(graph, m),
+        };
+
+        let pnexts: Vec<usize> = graph.edge_iter(prev_cond).collect();
+        for next_place in 0..2 {
+            let merge_place = next_place ^ 1;
+            for has_mids in 0..4 {
+                let mid1 = if (has_mids & 1) == 0 {
+                    None
+                } else {
+                    Some(pnexts[merge_place])
+                };
+                let mid2 = if (has_mids & 2) == 0 {
+                    None
+                } else {
+                    Some(pnexts[next_place])
+                };
+                if !check_mid(mid1) || !check_mid(mid2) {
+                    continue;
+                }
+
+                let next_cond = match mid2 {
+                    None => pnexts[next_place],
+                    Some(m) => graph.edge_iter(m).next().unwrap(),
+                };
+                if graph.reverse_edge_iter(next_cond).count() != 1 {
+                    continue;
+                }
+                if !is_branch(graph, next_cond) {
+                    continue;
+                }
+
+                let br_merge = match mid1 {
+                    None => pnexts[merge_place],
+                    Some(m) => graph.edge_iter(m).next().unwrap(),
+                };
+
+                let mid3 = match Simplifier::is_shortcut(graph, next_cond, br_merge) {
+                    None => continue,
+                    Some(m) => m,
+                };
+                if !check_mid(mid3) {
+                    continue;
+                }
+
+                self.do_short_circuit(graph, prev_cond, next_cond, br_merge, mid1, mid2, mid3);
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn do_short_circuit(
+        &mut self,
+        graph: &mut ASTGraph,
+        prev_cond: usize,
+        next_cond: usize,
+        br_merge: usize,
+        mid1: Option<usize>,
+        mid2: Option<usize>,
+        mid3: Option<usize>,
+    ) {
+        let (_br_prev_false, br_prev_true) = match graph.read_note(prev_cond).branch_attr {
+            BranchAttr::NotBranch => panic!("prev_cond is not branch"),
             BranchAttr::Branch(br_false, br_true) => (br_false, br_true),
         };
-
-        let br_test_0 = is_branch(graph, br_prev_false);
-        let br_test_1 = is_branch(graph, br_prev_true);
-        if br_test_0 && br_test_1 {
-            return false;
-        }
-        let next_0 = if br_test_0 {
-            br_prev_false
-        } else {
-            match graph.edge_iter(br_prev_false).next() {
-                None => return false,
-                Some(x) => x,
-            }
-        };
-        let next_1 = if br_test_1 {
-            br_prev_true
-        } else {
-            match graph.edge_iter(br_prev_true).next() {
-                None => return false,
-                Some(x) => x,
-            }
-        };
-
-        let next_cond: usize;
-        let mid1: Option<usize>;
-        let mid2: Option<usize>;
-        let br_merge: usize;
-        let mid3: Option<usize>;
-
-        if let Some(x) = Simplifier::is_shortcut(graph, next_0, next_1) {
-            mid1 = if br_test_1 { None } else { Some(br_prev_true) };
-            mid2 = if br_test_0 { None } else { Some(br_prev_false) };
-            mid3 = x;
-            next_cond = next_0;
-            br_merge = next_1;
-        } else if let Some(x) = Simplifier::is_shortcut(graph, next_1, next_0) {
-            mid1 = if br_test_0 { None } else { Some(br_prev_false) };
-            mid2 = if br_test_1 { None } else { Some(br_prev_true) };
-            mid3 = x;
-            next_cond = next_1;
-            br_merge = next_0;
-        } else {
-            return false;
-        }
-
-        if graph.reverse_edge_iter(next_cond).count() != 1 {
-            return false;
-        }
-        for mid in [mid1, mid2, mid3].iter() {
-            if let Some(x) = *mid {
-                if graph.reverse_edge_iter(x).count() != 1 {
-                    return false;
-                }
-                if is_branch(graph, x) {
-                    return false;
-                }
-            }
-        }
-
         let (br_next_false, br_next_true) = match graph.read_note(next_cond).branch_attr {
-            BranchAttr::NotBranch => return false,
+            BranchAttr::NotBranch => panic!("next_cond is not branch"),
             BranchAttr::Branch(br_false, br_true) => (br_false, br_true),
         };
         let br_merge_prev = match mid1 {
@@ -638,7 +648,6 @@ impl Simplifier {
         self.queue_add(new_node2);
         self.queue_add(br_merge);
         self.new_vars.push(p_var);
-        true
     }
 
     fn is_shortcut(graph: &ASTGraph, branch: usize, merge: usize) -> Option<Option<usize>> {
@@ -661,7 +670,7 @@ impl Simplifier {
                 return Some(Some(mid));
             }
         }
-        return None;
+        None
     }
 
     fn get_loop_branch(

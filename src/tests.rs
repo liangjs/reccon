@@ -113,13 +113,14 @@ fn random_test_seeded(seed: <ChaCha8Rng as SeedableRng>::Seed, node_num: usize, 
 
 #[test]
 fn random_test() {
+    //random_test_seeded([142, 224, 6, 43, 41, 93, 94, 101, 66, 76, 33, 125, 114, 149, 4, 10, 180, 201, 148, 85, 73, 203, 107, 132, 23, 250, 36, 117, 78, 43, 30, 53], 5, 0.4);
     let tests = [(5, 0.4, 100)];
-    for (node_num, density, times) in tests {
-        for _ in 0..times {
+    for (node_num, density, times) in tests.iter() {
+        for _ in 0..*times {
             let mut seed: <ChaCha8Rng as SeedableRng>::Seed = Default::default();
             thread_rng().fill(&mut seed);
             println!("random_test_seeded({:?}, {}, {})", seed, node_num, density);
-            random_test_seeded(seed, node_num, density);
+            random_test_seeded(seed, *node_num, *density);
         }
     }
 }
