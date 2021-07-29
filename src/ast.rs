@@ -1,3 +1,4 @@
+use crate::graph::NodeIndex;
 use std::collections::HashMap;
 
 use itertools::Itertools;
@@ -9,7 +10,7 @@ pub enum Statement {
         next: Box<Statement>,
     },
     Original {
-        node_num: usize,
+        node_idx: NodeIndex,
     },
     Assign {
         var: String,
@@ -44,7 +45,7 @@ impl ToString for Statement {
             Statement::Compound { first, next } => {
                 format!("{}\n{}", first.to_string(), next.to_string())
             }
-            Statement::Original { node_num } => format!("node {};", node_num),
+            Statement::Original { node_idx } => format!("node idx {};", node_idx.index()),
             Statement::Assign { var, value } => format!("{} = {};", var, value.to_string()),
             Statement::IfThen { cond, body_then } => format!(
                 "if ({}) {{\n{}\n}}",
@@ -86,7 +87,7 @@ fn indent(stmts: &str) -> String {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum BoolExpr {
     Original {
-        node_num: usize,
+        node_idx: NodeIndex,
     },
     Var {
         name: String,
@@ -114,8 +115,7 @@ impl BoolExpr {
     pub fn from_bool(b: bool) -> BoolExpr {
         if b {
             BoolExpr::True
-        }
-        else {
+        } else {
             BoolExpr::False
         }
     }
@@ -124,7 +124,7 @@ impl BoolExpr {
 impl ToString for BoolExpr {
     fn to_string(&self) -> String {
         match self {
-            BoolExpr::Original { node_num } => format!("node {}", node_num),
+            BoolExpr::Original { node_idx } => format!("node idx {}", node_idx.index()),
             BoolExpr::Var { name } => name.clone(),
             BoolExpr::True => String::from("true"),
             BoolExpr::False => String::from("false"),
@@ -187,13 +187,13 @@ impl ToString for AST {
 }
 
 impl Statement {
-    pub fn unfold(&self, map: &HashMap<usize, &AST>) -> Statement {
+    pub fn unfold(&self, map: &HashMap<NodeIndex, &AST>) -> Statement {
         match self {
             Statement::Compound { first, next } => Statement::Compound {
                 first: Box::new(first.unfold(map)),
                 next: Box::new(next.unfold(map)),
             },
-            Statement::Original { node_num } => match map.get(node_num) {
+            Statement::Original { node_idx } => match map.get(node_idx) {
                 Some(ast) => ast.clone_state(),
                 None => panic!("origin not in map"),
             },
@@ -231,9 +231,9 @@ impl Statement {
 }
 
 impl BoolExpr {
-    pub fn unfold(&self, map: &HashMap<usize, &AST>) -> BoolExpr {
+    pub fn unfold(&self, map: &HashMap<NodeIndex, &AST>) -> BoolExpr {
         match self {
-            BoolExpr::Original { node_num } => match map.get(node_num) {
+            BoolExpr::Original { node_idx } => match map.get(node_idx) {
                 Some(ast) => ast.clone_bool(),
                 None => panic!("origin not in map"),
             },
@@ -260,7 +260,7 @@ impl BoolExpr {
 }
 
 impl Expr {
-    pub fn unfold(&self, map: &HashMap<usize, &AST>) -> Expr {
+    pub fn unfold(&self, map: &HashMap<NodeIndex, &AST>) -> Expr {
         match self {
             Expr::Bool(expr) => Expr::Bool(expr.unfold(map)),
             Expr::Int(x) => Expr::Int(*x),

@@ -4,9 +4,10 @@ pub mod ast;
 mod rec_loop;
 use std::collections::HashMap;
 
-use graph::{Graph, NotedGraph};
+use graph::ControlFlowGraph;
 pub use rec_loop::*;
 
+/*
 mod rec_ast;
 pub use rec_ast::*;
 
@@ -15,7 +16,7 @@ pub struct RecResult {
     pub new_vars: Vec<String>,
 }
 
-pub fn reconstruct(graph: &dyn graph::Graph, entry: usize) -> Option<RecResult> {
+pub fn reconstruct<N>(graph: &ControlFlowGraph<N>, entry: usize) -> Option<RecResult> {
     let loop_result = loop_structure(graph, entry)?;
     let ast_result = ast_structure(&loop_result.graph, loop_result.entry)?;
 
@@ -37,3 +38,4 @@ pub fn reconstruct(graph: &dyn graph::Graph, entry: usize) -> Option<RecResult> 
 
 #[cfg(test)]
 mod tests;
+*/
