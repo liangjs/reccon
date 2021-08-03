@@ -126,14 +126,13 @@ fn random_graph<T: Rng>(
 fn random_test_seeded(seed: <ChaCha8Rng as SeedableRng>::Seed, node_num: usize, density: f64) {
     let mut rng = ChaCha8Rng::from_seed(seed);
     let (graph, entry) = random_graph(&mut rng, node_num, density);
+    println!("{}", dot_view(&graph, entry));
     let result = match reconstruct(&graph, entry) {
         None => {
-            dot_view(&graph, entry);
             panic!("reconstruct failed");
         }
         Some(r) => r,
     };
-    dot_view(&graph, entry);
     println!("{}", result.stmt.to_string());
     Walker::exhaustive_walk(&graph, entry, &result);
 }
@@ -392,7 +391,7 @@ impl Walker {
             Expr::Bool(bool_expr) => match bool_expr {
                 BoolExpr::Original { node_idx } => {
                     assert_eq!(Some(*node_idx), state.node);
-                    let nexts: Vec<NodeIndex> = graph.neighbors(*node_idx).collect();
+                    let nexts: Vec<NodeIndex> = ordered_neighbors(graph, *node_idx);
                     assert_eq!(nexts.len(), 2);
                     let mut state_new = state.clone();
                     state
