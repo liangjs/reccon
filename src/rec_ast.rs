@@ -3,7 +3,10 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::iter::FromIterator;
 
+use itertools::Itertools;
+use petgraph::algo::{dominators, toposort};
 use petgraph::data::DataMap;
+use petgraph::graphmap::DiGraphMap;
 use petgraph::visit::{EdgeRef, IntoEdgeReferences, IntoNodeIdentifiers};
 use petgraph::Direction;
 
@@ -30,7 +33,10 @@ pub fn ast_structure<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Option
             break;
         }
         if !result.updated {
-            return None;
+            match Splitter::split(&mut ast_graph, entry) {
+                None => return None,
+                Some(_) => {}
+            };
         }
     }
     let ast = &ast_graph.node_weights().next()?.ast;
@@ -49,6 +55,18 @@ fn add_halt(graph: &mut ASTGraph) {
             graph.add_edge(node, halt, ControlFlowEdge::NotBranch);
         }
     }
+}
+
+fn add_halt_one(graph: &mut ASTGraph) -> NodeIndex {
+    let nodes: Vec<NodeIndex> = graph.node_identifiers().collect();
+    let halt = graph.add_node(NodeAttr::new_node(AST::AState(Statement::Halt)));
+    for node in nodes.iter() {
+        let node = *node;
+        if graph.edges(node).count() == 0 {
+            graph.add_edge(node, halt, ControlFlowEdge::NotBranch);
+        }
+    }
+    halt
 }
 
 fn construct_ast_graph<N>(
@@ -108,28 +126,11 @@ fn is_branch(graph: &ASTGraph, node: NodeIndex) -> bool {
 }
 
 fn branch_attr(graph: &ASTGraph, node: NodeIndex) -> Option<(NodeIndex, NodeIndex)> {
-    let mut it = graph.edges(node);
-    let e1 = match it.next() {
-        None => return None,
-        Some(e) => e,
-    };
-    let e2 = match it.next() {
-        None => return None,
-        Some(e) => e,
-    };
-    assert!(it.next().is_none());
-    let br_e1 = match e1.weight() {
-        ControlFlowEdge::NotBranch => return None,
-        ControlFlowEdge::Branch(br) => *br,
-    };
-    let br_e2 = match e2.weight() {
-        ControlFlowEdge::NotBranch => return None,
-        ControlFlowEdge::Branch(br) => *br,
-    };
-    assert!(br_e1 != br_e2);
-    match br_e1 {
-        false => Some((e1.target(), e2.target())),
-        true => Some((e2.target(), e1.target())),
+    let nexts = ordered_neighbors(graph, node);
+    if nexts.len() != 2 {
+        None
+    } else {
+        Some((nexts[0], nexts[1]))
     }
 }
 
@@ -251,11 +252,11 @@ impl Simplifier {
             if graph.edges(next).count() != 0 {
                 return false;
             }
-            let _new_node = Simplifier::replace_block(graph, vec![handle, next], ast_next);
+            let _new_node = replace_block(graph, vec![handle, next], ast_next);
             true
         } else {
             let loop_back = graph.contains_edge(next, handle);
-            let new_node = Simplifier::replace_block(
+            let new_node = replace_block(
                 graph,
                 vec![handle, next],
                 AST::AState(Statement::Compound {
@@ -303,7 +304,7 @@ impl Simplifier {
         }
         let refresh_next = graph.edges(part).count() > 0;
 
-        let new_node = Simplifier::replace_block(
+        let new_node = replace_block(
             graph,
             vec![part, cond],
             AST::AState(Statement::IfThen {
@@ -356,7 +357,7 @@ impl Simplifier {
         }
 
         let old_nodes = vec![cond, br_false, br_true];
-        let new_node = Simplifier::replace_block(
+        let new_node = replace_block(
             graph,
             old_nodes,
             AST::AState(Statement::IfThenElse {
@@ -389,7 +390,7 @@ impl Simplifier {
             }
         };
 
-        let new_node = Simplifier::replace_block(
+        let new_node = replace_block(
             graph,
             vec![cond],
             AST::AState(Statement::IfThen {
@@ -472,7 +473,7 @@ impl Simplifier {
             value1: Box::new(cond_part),
             value2: Box::new(handle_part),
         });
-        let new_node = Simplifier::replace_condition(graph, vec![handle, prev_cond], branches, ast);
+        let new_node = replace_condition(graph, vec![handle, prev_cond], branches, ast);
 
         self.queue_add(new_node);
         self.queue_add(branch_merge);
@@ -645,8 +646,7 @@ impl Simplifier {
             name: p_var.clone(),
         });
 
-        let (new_node1, new_node2) =
-            Simplifier::replace_short_circuit(graph, old_nodes, branches, ast1, ast2);
+        let (new_node1, new_node2) = replace_short_circuit(graph, old_nodes, branches, ast1, ast2);
 
         self.queue_add(new_node1);
         self.queue_add(new_node2);
@@ -766,7 +766,7 @@ impl Simplifier {
             body: Box::new(body_stmt),
         });
 
-        let new_node = Simplifier::replace_block(graph, old_nodes, ast);
+        let new_node = replace_block(graph, old_nodes, ast);
         self.queue_add(new_node);
         true
     }
@@ -847,7 +847,7 @@ impl Simplifier {
             }),
         };
 
-        let new_node = Simplifier::replace_block(graph, old_nodes, ast);
+        let new_node = replace_block(graph, old_nodes, ast);
         self.queue_add(new_node);
         true
     }
@@ -892,111 +892,110 @@ impl Simplifier {
             }),
         });
 
-        let new_node = Simplifier::replace_block(graph, old_nodes, ast);
+        let new_node = replace_block(graph, old_nodes, ast);
         self.queue_add(new_node);
         true
     }
+}
 
-    fn replace_in_edges(graph: &mut ASTGraph, old_nodes: &Vec<NodeIndex>, node: NodeIndex) {
-        let old_nodes: HashSet<NodeIndex> = HashSet::from_iter(old_nodes.clone());
-        for old in old_nodes.iter() {
-            let old = *old;
-            let prevs: Vec<NodeIndex> =
-                graph.neighbors_directed(old, Direction::Incoming).collect();
-            /* replace in edges */
-            for prev in prevs.iter() {
-                if old_nodes.contains(prev) {
-                    continue;
-                }
-                replace_edge_dest(graph, *prev, old, node);
+fn replace_in_edges(graph: &mut ASTGraph, old_nodes: &Vec<NodeIndex>, node: NodeIndex) {
+    let old_nodes: HashSet<NodeIndex> = HashSet::from_iter(old_nodes.clone());
+    for old in old_nodes.iter() {
+        let old = *old;
+        let prevs: Vec<NodeIndex> = graph.neighbors_directed(old, Direction::Incoming).collect();
+        /* replace in edges */
+        for prev in prevs.iter() {
+            if old_nodes.contains(prev) {
+                continue;
             }
+            replace_edge_dest(graph, *prev, old, node);
         }
     }
+}
 
-    fn replace_out_edges_block(graph: &mut ASTGraph, old_nodes: &Vec<NodeIndex>, node: NodeIndex) {
-        let old_nodes: HashSet<NodeIndex> = HashSet::from_iter(old_nodes.clone());
-        /* record out edges */
-        let mut all_nexts: HashSet<NodeIndex> = HashSet::new();
-        for old in old_nodes.iter() {
-            let old = *old;
-            for next in graph.neighbors(old) {
-                if old_nodes.contains(&next) {
-                    continue;
-                }
-                all_nexts.insert(next);
+fn replace_out_edges_block(graph: &mut ASTGraph, old_nodes: &Vec<NodeIndex>, node: NodeIndex) {
+    let old_nodes: HashSet<NodeIndex> = HashSet::from_iter(old_nodes.clone());
+    /* record out edges */
+    let mut all_nexts: HashSet<NodeIndex> = HashSet::new();
+    for old in old_nodes.iter() {
+        let old = *old;
+        for next in graph.neighbors(old) {
+            if old_nodes.contains(&next) {
+                continue;
             }
+            all_nexts.insert(next);
         }
-        /* add out edges */
-        if all_nexts.len() == 0 {
-            return;
-        }
-        if all_nexts.len() != 1 {
-            panic!("Block has many outgoing edges.");
-        }
-        let next = all_nexts.iter().next().unwrap();
-        graph.add_edge(node, *next, ControlFlowEdge::NotBranch);
     }
+    /* add out edges */
+    if all_nexts.len() == 0 {
+        return;
+    }
+    if all_nexts.len() != 1 {
+        panic!("Block has many outgoing edges.");
+    }
+    let next = all_nexts.iter().next().unwrap();
+    graph.add_edge(node, *next, ControlFlowEdge::NotBranch);
+}
 
-    fn replace_out_edges_cond(
-        graph: &mut ASTGraph,
-        old_nodes: &Vec<NodeIndex>,
-        node: NodeIndex,
-        branches: (NodeIndex, NodeIndex),
-    ) {
-        let old_nodes: HashSet<NodeIndex> = HashSet::from_iter(old_nodes.clone());
-        let (mut br_false, mut br_true) = branches;
-        if old_nodes.contains(&br_false) {
-            br_false = node;
-        }
-        if old_nodes.contains(&br_true) {
-            br_true = node;
-        }
-        graph.add_edge(node, br_false, ControlFlowEdge::Branch(false));
-        graph.add_edge(node, br_true, ControlFlowEdge::Branch(true));
+fn replace_out_edges_cond(
+    graph: &mut ASTGraph,
+    old_nodes: &Vec<NodeIndex>,
+    node: NodeIndex,
+    branches: (NodeIndex, NodeIndex),
+) {
+    let old_nodes: HashSet<NodeIndex> = HashSet::from_iter(old_nodes.clone());
+    let (mut br_false, mut br_true) = branches;
+    if old_nodes.contains(&br_false) {
+        br_false = node;
     }
+    if old_nodes.contains(&br_true) {
+        br_true = node;
+    }
+    graph.add_edge(node, br_false, ControlFlowEdge::Branch(false));
+    graph.add_edge(node, br_true, ControlFlowEdge::Branch(true));
+}
 
-    fn remove_old_nodes(graph: &mut ASTGraph, old_nodes: &Vec<NodeIndex>) {
-        for old in old_nodes.iter() {
-            graph.remove_node(*old).unwrap();
-        }
+fn remove_old_nodes(graph: &mut ASTGraph, old_nodes: &Vec<NodeIndex>) {
+    for old in old_nodes.iter() {
+        graph.remove_node(*old).unwrap();
     }
+}
 
-    fn replace_block(graph: &mut ASTGraph, old_nodes: Vec<NodeIndex>, ast: AST) -> NodeIndex {
-        let node = graph.add_node(NodeAttr::new_node(ast));
-        Simplifier::replace_in_edges(graph, &old_nodes, node);
-        Simplifier::replace_out_edges_block(graph, &old_nodes, node);
-        Simplifier::remove_old_nodes(graph, &old_nodes);
-        node
-    }
+fn replace_block(graph: &mut ASTGraph, old_nodes: Vec<NodeIndex>, ast: AST) -> NodeIndex {
+    let node = graph.add_node(NodeAttr::new_node(ast));
+    replace_in_edges(graph, &old_nodes, node);
+    replace_out_edges_block(graph, &old_nodes, node);
+    remove_old_nodes(graph, &old_nodes);
+    node
+}
 
-    fn replace_condition(
-        graph: &mut ASTGraph,
-        old_nodes: Vec<NodeIndex>,
-        branches: (NodeIndex, NodeIndex),
-        ast: AST,
-    ) -> NodeIndex {
-        let node = graph.add_node(NodeAttr::new_node(ast));
-        Simplifier::replace_in_edges(graph, &old_nodes, node);
-        Simplifier::replace_out_edges_cond(graph, &old_nodes, node, branches);
-        Simplifier::remove_old_nodes(graph, &old_nodes);
-        node
-    }
+fn replace_condition(
+    graph: &mut ASTGraph,
+    old_nodes: Vec<NodeIndex>,
+    branches: (NodeIndex, NodeIndex),
+    ast: AST,
+) -> NodeIndex {
+    let node = graph.add_node(NodeAttr::new_node(ast));
+    replace_in_edges(graph, &old_nodes, node);
+    replace_out_edges_cond(graph, &old_nodes, node, branches);
+    remove_old_nodes(graph, &old_nodes);
+    node
+}
 
-    fn replace_short_circuit(
-        graph: &mut ASTGraph,
-        old_nodes: Vec<NodeIndex>,
-        branches: (NodeIndex, NodeIndex),
-        ast1: AST,
-        ast2: AST,
-    ) -> (NodeIndex, NodeIndex) {
-        let node1 = graph.add_node(NodeAttr::new_node(ast1));
-        let node2 = graph.add_node(NodeAttr::new_node(ast2));
-        Simplifier::replace_in_edges(graph, &old_nodes, node1);
-        Simplifier::replace_out_edges_cond(graph, &old_nodes, node2, branches);
-        graph.add_edge(node1, node2, ControlFlowEdge::NotBranch);
-        Simplifier::remove_old_nodes(graph, &old_nodes);
-        (node1, node2)
-    }
+fn replace_short_circuit(
+    graph: &mut ASTGraph,
+    old_nodes: Vec<NodeIndex>,
+    branches: (NodeIndex, NodeIndex),
+    ast1: AST,
+    ast2: AST,
+) -> (NodeIndex, NodeIndex) {
+    let node1 = graph.add_node(NodeAttr::new_node(ast1));
+    let node2 = graph.add_node(NodeAttr::new_node(ast2));
+    replace_in_edges(graph, &old_nodes, node1);
+    replace_out_edges_cond(graph, &old_nodes, node2, branches);
+    graph.add_edge(node1, node2, ControlFlowEdge::NotBranch);
+    remove_old_nodes(graph, &old_nodes);
+    (node1, node2)
 }
 
 fn replace_edge_dest(
@@ -1008,4 +1007,118 @@ fn replace_edge_dest(
     let edge = graph.find_edge(id_from, id_to_old).unwrap();
     let edge_attr = graph.remove_edge(edge).unwrap();
     graph.add_edge(id_from, id_to_new, edge_attr);
+}
+
+struct Splitter<'a> {
+    graph: &'a mut ASTGraph,
+    sink: NodeIndex,
+    doms: dominators::Dominators<NodeIndex>,
+    rdoms: dominators::Dominators<NodeIndex>,
+    visited: HashSet<NodeIndex>,
+}
+
+impl<'a> Drop for Splitter<'a> {
+    fn drop(&mut self) {
+        self.graph.remove_node(self.sink);
+    }
+}
+
+impl<'a> Splitter<'a> {
+    pub fn split(graph: &'a mut ASTGraph, entry: NodeIndex) -> Option<(NodeIndex, NodeIndex)> {
+        let mut splitter = Splitter::new(graph, entry);
+
+        let mut order: Vec<NodeIndex> = match toposort::<&ASTGraph>(splitter.graph, None) {
+            Ok(ord) => ord,
+            Err(cyc) => panic!("cycle is found when splitting: {:?}", cyc),
+        };
+        order.reverse();
+        for cond in order {
+            if !is_branch(splitter.graph, cond) {
+                continue;
+            }
+            match splitter.try_split_under(cond) {
+                None => continue,
+                Some(ans) => return Some(ans),
+            };
+        }
+        None
+    }
+
+    fn new(graph: &'a mut ASTGraph, entry: NodeIndex) -> Splitter {
+        let sink = add_halt_one(graph);
+        let rgraph = Splitter::build_reverse_graph(graph);
+        let doms = dominators::simple_fast::<&ASTGraph>(graph, entry);
+        let rdoms = dominators::simple_fast(&rgraph, sink);
+        Splitter {
+            graph,
+            sink,
+            doms,
+            rdoms,
+            visited: HashSet::new(),
+        }
+    }
+
+    fn build_reverse_graph(graph: &ASTGraph) -> DiGraphMap<NodeIndex, usize> {
+        let mut rgraph = DiGraphMap::new();
+        for node in graph.node_indices() {
+            rgraph.add_node(node);
+        }
+        for edge in graph.edge_references() {
+            rgraph.add_edge(edge.target(), edge.source(), 0);
+        }
+        rgraph
+    }
+
+    fn try_split_under(&mut self, head: NodeIndex) -> Option<(NodeIndex, NodeIndex)> {
+        let imm_post_dom = match self.rdoms.immediate_dominator(head) {
+            None => return None,
+            Some(x) => x,
+        };
+        self.visited = HashSet::new();
+        self.dfs(head, head, imm_post_dom)
+    }
+
+    fn dfs(
+        &mut self,
+        head: NodeIndex,
+        current: NodeIndex,
+        imm_post_dom: NodeIndex,
+    ) -> Option<(NodeIndex, NodeIndex)> {
+        self.visited.insert(current);
+        if current == imm_post_dom {
+            return None;
+        }
+        let mut dom_iter = self.doms.dominators(current).unwrap();
+        if !dom_iter.contains(&head) {
+            return Some((current, self.split_node(current, head)));
+        }
+        let nexts: Vec<NodeIndex> = self.graph.neighbors(current).collect();
+        for next in nexts {
+            if self.visited.contains(&next) {
+                continue;
+            }
+            let ans = self.dfs(head, next, imm_post_dom);
+            if ans.is_some() {
+                return ans;
+            }
+        }
+        None
+    }
+
+    fn split_node(&mut self, node: NodeIndex, head: NodeIndex) -> NodeIndex {
+        let ast = self.graph.node_weight(node).unwrap().ast.clone();
+        let new_node = self.graph.add_node(NodeAttr::new_node(ast));
+        let prevs: Vec<NodeIndex> = self
+            .graph
+            .neighbors_directed(node, Direction::Incoming)
+            .collect();
+        for prev in prevs {
+            let mut dom_iter = self.doms.dominators(prev).unwrap();
+            if dom_iter.contains(&head) {
+                continue;
+            }
+            replace_edge_dest(self.graph, prev, node, new_node);
+        }
+        new_node
+    }
 }
