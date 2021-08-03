@@ -22,28 +22,28 @@ pub fn loop_structure<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Optio
     let (mut loop_graph, entry) = construct_loop_graph(graph, entry)?;
 
     LoopMarker::mark(&mut loop_graph, entry);
-    //println!("===== mark1");
-    //debug_print(&loop_graph);
+    println!("===== mark1");
+    debug_print(&loop_graph);
 
     let NormalizeResult {
         entry,
         new_vars: new_vars1,
     } = LoopNormalizer::normalize_exit(&mut loop_graph, entry);
-    //println!("===== normal exit");
-    //debug_print(&loop_graph);
+    println!("===== normal exit");
+    debug_print(&loop_graph);
 
     LoopMarker::mark(&mut loop_graph, entry);
-    //println!("===== mark2");
-    //debug_print(&loop_graph);
-    //dot_graph(&loop_graph, entry);
+    println!("===== mark2");
+    debug_print(&loop_graph);
+    println!("{}", dot_view(&loop_graph, entry));
 
     let NormalizeResult {
         entry,
         new_vars: mut new_vars2,
     } = LoopNormalizer::normalize_entry(&mut loop_graph, entry);
-    //println!("===== normal entry");
-    //debug_print(&loop_graph);
-    //dot_graph(&loop_graph, entry);
+    println!("===== normal entry");
+    debug_print(&loop_graph);
+    println!("{}", dot_view(&loop_graph, entry));
 
     let out_graph = construct_out_graph(&loop_graph);
     let mut new_vars = new_vars1;
@@ -390,7 +390,6 @@ impl LoopNormalizer {
             for y in graph.neighbors_directed(x, EdgeDirection::Incoming) {
                 if !self.loop_nodes.get(&head).unwrap().contains(&y) {
                     entries.push((y, x));
-                    break;
                 }
             }
         }

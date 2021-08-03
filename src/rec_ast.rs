@@ -23,12 +23,11 @@ pub struct ASTRecResult {
 pub fn ast_structure<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Option<ASTRecResult> {
     let (mut ast_graph, entry) = construct_ast_graph(graph, entry)?;
     add_halt(&mut ast_graph);
-    //dot_graph(&ast_graph, entry);
     let mut new_vars = Vec::new();
     loop {
         let result = Simplifier::simplify(&mut ast_graph, entry);
         new_vars.extend(result.new_vars);
-        //dot_graph(&ast_graph, entry);
+        println!("{}", dot_view(&ast_graph, entry));
         if ast_graph.node_count() == 1 {
             break;
         }
@@ -1108,6 +1107,16 @@ impl<'a> Splitter<'a> {
     fn split_node(&mut self, node: NodeIndex, head: NodeIndex) -> NodeIndex {
         let ast = self.graph.node_weight(node).unwrap().ast.clone();
         let new_node = self.graph.add_node(NodeAttr::new_node(ast));
+
+        let nexts: Vec<(NodeIndex, ControlFlowEdge)> = self
+            .graph
+            .edges_directed(node, Direction::Outgoing)
+            .map(|e| (e.target(), *e.weight()))
+            .collect();
+        for (next, weight) in nexts {
+            self.graph.add_edge(new_node, next, weight);
+        }
+
         let prevs: Vec<NodeIndex> = self
             .graph
             .neighbors_directed(node, Direction::Incoming)
@@ -1119,6 +1128,7 @@ impl<'a> Splitter<'a> {
             }
             replace_edge_dest(self.graph, prev, node, new_node);
         }
+
         new_node
     }
 }

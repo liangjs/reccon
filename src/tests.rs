@@ -68,6 +68,13 @@ fn test_double_edge() {
     reconstruct(&graph, entry).unwrap();
 }
 
+#[test]
+fn test_abnormal_selection() {
+    let (graph, entry) = build_graph(
+        5, 0, vec![(0, 1), (0, 2), (1, 3), (1, 4), (2, 3), (2, 4)]);
+    reconstruct(&graph, entry).unwrap();
+}
+
 fn random_graph<T: Rng>(
     rng: &mut T,
     node_num: usize,
@@ -139,8 +146,7 @@ fn random_test_seeded(seed: <ChaCha8Rng as SeedableRng>::Seed, node_num: usize, 
 
 #[test]
 fn random_test() {
-    //random_test_seeded([142, 224, 6, 43, 41, 93, 94, 101, 66, 76, 33, 125, 114, 149, 4, 10, 180, 201, 148, 85, 73, 203, 107, 132, 23, 250, 36, 117, 78, 43, 30, 53], 5, 0.4);
-    random_test_seeded([203, 34, 247, 50, 119, 183, 196, 253, 211, 165, 215, 130, 97, 11, 78, 177, 201, 127, 235, 120, 84, 96, 23, 78, 238, 201, 231, 78, 239, 97, 221, 244], 6, 0.4);
+    random_test_seeded([236, 223, 150, 56, 234, 1, 79, 246, 129, 242, 218, 136, 172, 41, 155, 16, 148, 176, 84, 123, 242, 3, 243, 252, 111, 163, 226, 142, 185, 151, 82, 129], 6, 0.4);
     let tests = [(6, 0.4, 100)];
     for (node_num, density, times) in tests.iter() {
         for _ in 0..*times {
