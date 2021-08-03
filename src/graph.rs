@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use petgraph::dot;
 pub use petgraph::graph::NodeIndex;
-use petgraph::visit::{IntoEdgeReferences, IntoNodeReferences, EdgeRef};
+use petgraph::visit::{EdgeRef, IntoEdgeReferences, IntoNodeReferences};
 
 #[derive(Debug, Clone, Copy)]
 pub enum ControlFlowEdge {
@@ -10,7 +10,12 @@ pub enum ControlFlowEdge {
     Branch(bool),
 }
 
-pub type ControlFlowGraph<N> = petgraph::graph::DiGraph<N, ControlFlowEdge>;
+pub type ControlFlowGraph<N> = petgraph::stable_graph::StableGraph<
+    N,
+    ControlFlowEdge,
+    petgraph::Directed,
+    petgraph::graph::DefaultIx,
+>;
 
 pub fn debug_print<N: Debug>(graph: &ControlFlowGraph<N>) {
     println!("node num: {}", graph.node_count());

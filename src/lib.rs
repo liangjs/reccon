@@ -5,9 +5,9 @@ mod rec_loop;
 use std::collections::HashMap;
 
 use graph::ControlFlowGraph;
+use petgraph::{graph::NodeIndex, visit::IntoNodeReferences};
 pub use rec_loop::*;
 
-/*
 mod rec_ast;
 pub use rec_ast::*;
 
@@ -16,13 +16,12 @@ pub struct RecResult {
     pub new_vars: Vec<String>,
 }
 
-pub fn reconstruct<N>(graph: &ControlFlowGraph<N>, entry: usize) -> Option<RecResult> {
+pub fn reconstruct<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Option<RecResult> {
     let loop_result = loop_structure(graph, entry)?;
     let ast_result = ast_structure(&loop_result.graph, loop_result.entry)?;
 
     let mut map = HashMap::new();
-    for node in loop_result.graph.node_iter() {
-        let stmt = loop_result.graph.read_note(node);
+    for (node, stmt) in loop_result.graph.node_references() {
         map.insert(node, stmt);
     }
 
@@ -38,4 +37,3 @@ pub fn reconstruct<N>(graph: &ControlFlowGraph<N>, entry: usize) -> Option<RecRe
 
 #[cfg(test)]
 mod tests;
-*/

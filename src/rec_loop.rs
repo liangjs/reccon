@@ -1,13 +1,10 @@
-use itertools::enumerate;
-use itertools::sorted;
-use itertools::Itertools;
-use petgraph::visit::IntoNodeReferences;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::usize;
 
+use itertools::Itertools;
+use itertools::{enumerate, sorted};
 use petgraph::visit::EdgeRef;
+use petgraph::visit::{IntoEdgeReferences, IntoNodeReferences};
 use petgraph::EdgeDirection;
 
 use crate::ast::*;
@@ -69,13 +66,12 @@ fn construct_loop_graph<N>(
         let node = loop_graph.add_node(NodeAttr::new(x, is_branch));
         node_map.insert(x, node);
     }
-    for x in graph.node_indices() {
+    for e in graph.edge_references() {
+        let x = e.source();
+        let y = e.target();
         let node_x = node_map.get(&x).unwrap();
-        for e in graph.edges(x) {
-            let y = e.target();
-            let node_y = node_map.get(&y).unwrap();
-            loop_graph.add_edge(*node_x, *node_y, *e.weight());
-        }
+        let node_y = node_map.get(&y).unwrap();
+        loop_graph.add_edge(*node_x, *node_y, *e.weight());
     }
     let new_entry = node_map.get(&entry).unwrap();
     Some((loop_graph, *new_entry))
@@ -180,8 +176,8 @@ impl LoopMarker {
     }
 
     fn clean_loop_attr(graph: &mut LoopGraph) {
-        for x in graph.node_indices() {
-            graph.node_weight_mut(x).unwrap().loop_attr = LoopAttr {
+        for attr in graph.node_weights_mut() {
+            attr.loop_attr = LoopAttr {
                 is_head: false,
                 level: usize::MAX,
                 inner: NodeIndex::end(),

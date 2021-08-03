@@ -12,35 +12,67 @@ use crate::ast::*;
 use crate::graph::*;
 use crate::*;
 
+fn build_graph(
+    node_num: usize,
+    entry: usize,
+    edges: Vec<(usize, usize)>,
+) -> (ControlFlowGraph<usize>, NodeIndex) {
+    let mut graph = ControlFlowGraph::with_capacity(node_num, edges.len());
+    let mut node_map = HashMap::new();
+    let mut out_degree = vec![0; node_num];
+    for i in 0..node_num {
+        let node = graph.add_node(i);
+        node_map.insert(i, node);
+    }
+    for e in edges.iter() {
+        out_degree[e.0] += 1;
+    }
+    let mut out_visit = vec![false; node_num];
+    for e in edges.iter() {
+        let e0 = node_map.get(&e.0).unwrap();
+        let e1 = node_map.get(&e.1).unwrap();
+        let weight = if out_degree[e.0] < 2 {
+            ControlFlowEdge::NotBranch
+        } else {
+            let w = ControlFlowEdge::Branch(out_visit[e.0]);
+            out_visit[e.0] = true;
+            w
+        };
+        graph.add_edge(*e0, *e1, weight);
+    }
+    let entry = node_map.get(&entry).unwrap();
+    (graph, *entry)
+}
+
 #[test]
 fn test_overlap_loop() {
-    let graph: StaticGraph<String> =
-        StaticGraph::new(5, vec![(0, 1), (1, 2), (2, 0), (2, 3), (3, 1), (3, 4)]);
-    let results = loop_structure(&graph, 0).unwrap();
-    assert_eq!(results.graph.node_num(), 10);
+    let (graph, entry) = build_graph(5, 0, vec![(0, 1), (1, 2), (2, 0), (2, 3), (3, 1), (3, 4)]);
+    let results = loop_structure(&graph, entry).unwrap();
+    assert_eq!(results.graph.node_count(), 10);
 }
 
 #[test]
 fn test_exch_loop() {
-    let graph: StaticGraph<String> = StaticGraph::new(
+    let (graph, entry) = build_graph(
         5,
+        0,
         vec![(0, 1), (0, 3), (1, 2), (1, 4), (2, 1), (2, 3), (3, 2)],
     );
-    let results = loop_structure(&graph, 0).unwrap();
-    assert_eq!(results.graph.node_num(), 8);
+    let results = loop_structure(&graph, entry).unwrap();
+    assert_eq!(results.graph.node_count(), 8);
 }
 
 #[test]
 fn test_double_edge() {
-    let graph: StaticGraph<String> = StaticGraph::new(2, vec![(0, 1), (0, 1)]);
-    reconstruct(&graph, 0).unwrap();
+    let (graph, entry) = build_graph(2, 0, vec![(0, 1), (0, 1)]);
+    reconstruct(&graph, entry).unwrap();
 }
 
 fn random_graph<T: Rng>(
     rng: &mut T,
     node_num: usize,
     density: f64,
-) -> (StaticGraph<String>, usize) {
+) -> (ControlFlowGraph<usize>, NodeIndex) {
     //let mut rng = rand::thread_rng();
     let mut edges: Vec<Vec<usize>> = Vec::with_capacity(node_num);
     edges.resize(node_num, Default::default());
@@ -87,12 +119,7 @@ fn random_graph<T: Rng>(
             edges_vec.push((order[x], order[y]));
         }
     }
-    let mut graph: StaticGraph<String> = StaticGraph::new(node_num, edges_vec);
-    for i in graph.node_iter().collect_vec() {
-        let note = graph.get_note_mut(i);
-        *note = i.to_string();
-    }
-    let entry = order[0];
+    let (graph, entry) = build_graph(node_num, order[0], edges_vec);
     (graph, entry)
 }
 
@@ -101,12 +128,12 @@ fn random_test_seeded(seed: <ChaCha8Rng as SeedableRng>::Seed, node_num: usize, 
     let (graph, entry) = random_graph(&mut rng, node_num, density);
     let result = match reconstruct(&graph, entry) {
         None => {
-            dot_graph(&graph, entry);
+            dot_view(&graph, entry);
             panic!("reconstruct failed");
         }
         Some(r) => r,
     };
-    dot_graph(&graph, entry);
+    dot_view(&graph, entry);
     println!("{}", result.stmt.to_string());
     Walker::exhaustive_walk(&graph, entry, &result);
 }
@@ -139,13 +166,13 @@ enum EvalAST {
 
 #[derive(Clone, Debug)]
 struct WalkPath {
-    node: Option<usize>,
+    node: Option<NodeIndex>,
     vars: HashMap<String, Option<Value>>,
     ast_path: Vec<EvalAST>,
 }
 
 impl WalkPath {
-    pub fn new_empty(entry: usize, ast: EvalAST, vars: &Vec<String>) -> WalkPath {
+    pub fn new_empty(entry: NodeIndex, ast: EvalAST, vars: &Vec<String>) -> WalkPath {
         let mut vars_empty: HashMap<String, Option<Value>> = HashMap::new();
         for var in vars {
             vars_empty.insert(var.clone(), None);
@@ -199,7 +226,7 @@ struct Walker {
 }
 
 impl Walker {
-    pub fn exhaustive_walk(graph: &dyn Graph, entry: usize, result: &RecResult) {
+    pub fn exhaustive_walk<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex, result: &RecResult) {
         let init_path = WalkPath::new_empty(
             entry,
             EvalAST::AState(Box::new(result.stmt.clone())),
@@ -222,7 +249,7 @@ impl Walker {
         self.queue.push_back(state);
     }
 
-    fn eval(&mut self, graph: &dyn Graph) {
+    fn eval<N>(&mut self, graph: &ControlFlowGraph<N>) {
         while let Some(mut state) = self.queue.pop_front() {
             // println!("pop {:?}", state);
             let last_ast = state.ast_path.pop();
@@ -249,14 +276,18 @@ impl Walker {
         self.add_state(state);
     }
 
-    fn eval_stmt(&mut self, graph: &dyn Graph, mut state: Box<WalkPath>, stmt: Box<Statement>) {
+    fn eval_stmt<N>(
+        &mut self,
+        graph: &ControlFlowGraph<N>,
+        mut state: Box<WalkPath>,
+        stmt: Box<Statement>,
+    ) {
         match stmt.as_ref() {
             Statement::Compound { first, next } => {
                 if let Statement::Nop = first.as_ref() {
                     state.ast_path.push(EvalAST::AState(next.clone()));
                     self.add_state(state);
-                }
-                else {
+                } else {
                     let new_ast = EvalAST::AState(first.clone());
                     let old_ast = EvalAST::AState(Box::new(Statement::Compound {
                         first: Box::new(Statement::Nop),
@@ -265,9 +296,9 @@ impl Walker {
                     self.push_new_ast(state, Some(old_ast), new_ast);
                 }
             }
-            Statement::Original { node_num } => {
-                assert_eq!(Some(*node_num), state.node);
-                let nexts: Vec<usize> = graph.edge_iter(state.node.unwrap()).collect();
+            Statement::Original { node_idx } => {
+                assert_eq!(Some(*node_idx), state.node);
+                let nexts: Vec<NodeIndex> = graph.neighbors(state.node.unwrap()).collect();
                 state.node = if nexts.len() == 0 {
                     None
                 } else if nexts.len() == 1 {
@@ -351,12 +382,17 @@ impl Walker {
         val
     }
 
-    fn eval_expr(&mut self, graph: &dyn Graph, mut state: Box<WalkPath>, expr: Box<Expr>) {
+    fn eval_expr<N>(
+        &mut self,
+        graph: &ControlFlowGraph<N>,
+        mut state: Box<WalkPath>,
+        expr: Box<Expr>,
+    ) {
         match expr.as_ref() {
             Expr::Bool(bool_expr) => match bool_expr {
-                BoolExpr::Original { node_num } => {
-                    assert_eq!(Some(*node_num), state.node);
-                    let nexts: Vec<usize> = graph.edge_iter(*node_num).collect();
+                BoolExpr::Original { node_idx } => {
+                    assert_eq!(Some(*node_idx), state.node);
+                    let nexts: Vec<NodeIndex> = graph.neighbors(*node_idx).collect();
                     assert_eq!(nexts.len(), 2);
                     let mut state_new = state.clone();
                     state
@@ -408,7 +444,7 @@ impl Walker {
         }
     }
 
-    fn eval_bool(&mut self, _graph: &dyn Graph, mut state: Box<WalkPath>, res: bool) {
+    fn eval_bool<N>(&mut self, _graph: &ControlFlowGraph<N>, mut state: Box<WalkPath>, res: bool) {
         let last_ast = state
             .ast_path
             .pop()
@@ -443,7 +479,10 @@ impl Walker {
                     if res {
                         state
                             .ast_path
-                            .push(EvalAST::AState(Box::new(Statement::While { cond, body: body.clone() })));
+                            .push(EvalAST::AState(Box::new(Statement::While {
+                                cond,
+                                body: body.clone(),
+                            })));
                         state.ast_path.push(EvalAST::AState(body));
                     }
                     self.add_state(state);
@@ -508,7 +547,7 @@ impl Walker {
         }
     }
 
-    fn eval_int(&mut self, _graph: &dyn Graph, mut state: Box<WalkPath>, res: i32) {
+    fn eval_int<N>(&mut self, _graph: &ControlFlowGraph<N>, mut state: Box<WalkPath>, res: i32) {
         let last_ast = state
             .ast_path
             .pop()
