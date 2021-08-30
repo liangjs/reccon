@@ -203,6 +203,11 @@ impl LoopNormalizer {
         }
         let exits_num = exits.iter().map(|x| x.1).unique().count();
 
+        if exits_num <= 1 {
+            // how can this be wrong?
+            return;
+        }
+
         let outter_loop = graph.node_weight(head).unwrap().loop_attr.outer;
 
         /* create new vars */
