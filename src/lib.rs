@@ -1,7 +1,7 @@
 pub mod graph;
 pub mod ast;
 
-mod loop_mark;
+mod loop_utils;
 
 mod rec_loop;
 use std::collections::HashMap;
