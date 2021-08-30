@@ -38,4 +38,4 @@ pub fn reconstruct<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Option<R
 }
 
 #[cfg(test)]
-mod tests;
+mod test;
