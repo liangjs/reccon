@@ -1,6 +1,8 @@
 pub mod graph;
 pub mod ast;
 
+mod loop_mark;
+
 mod rec_loop;
 use std::collections::HashMap;
 
@@ -21,8 +23,8 @@ pub fn reconstruct<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Option<R
     let ast_result = ast_structure(&loop_result.graph, loop_result.entry)?;
 
     let mut map = HashMap::new();
-    for (node, stmt) in loop_result.graph.node_references() {
-        map.insert(node, stmt);
+    for (node, ast) in loop_result.graph.node_references() {
+        map.insert(node, ast);
     }
 
     let mut new_vars = Vec::new();

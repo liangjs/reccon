@@ -1,14 +1,15 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::usize;
 
+use itertools::sorted;
 use itertools::Itertools;
-use itertools::{enumerate, sorted};
 use petgraph::visit::EdgeRef;
 use petgraph::visit::{IntoEdgeReferences, IntoNodeReferences};
 use petgraph::EdgeDirection;
 
 use crate::ast::*;
 use crate::graph::*;
+use crate::loop_mark::*;
 
 const VAR_PREFIX: &str = "break_";
 
@@ -21,7 +22,7 @@ pub struct LoopRecOutput {
 pub fn loop_structure<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Option<LoopRecOutput> {
     let (mut loop_graph, entry) = construct_loop_graph(graph, entry)?;
 
-    LoopMarker::mark(&mut loop_graph, entry);
+    loop_mark(&mut loop_graph, entry);
     println!("===== mark1");
     debug_print(&loop_graph);
 
@@ -32,7 +33,7 @@ pub fn loop_structure<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Optio
     println!("===== normal exit");
     debug_print(&loop_graph);
 
-    LoopMarker::mark(&mut loop_graph, entry);
+    loop_mark(&mut loop_graph, entry);
     println!("===== mark2");
     debug_print(&loop_graph);
     println!("{}", dot_view(&loop_graph, entry));
@@ -108,12 +109,14 @@ impl ToString for NodeAttr {
     }
 }
 
-#[derive(Debug, Clone)]
-struct LoopAttr {
-    is_head: bool,
-    level: usize,
-    inner: NodeIndex,
-    outer: NodeIndex,
+impl GetLoopAttr for NodeAttr {
+    fn loop_attr_ref(&self) -> &LoopAttr {
+        &self.loop_attr
+    }
+
+    fn loop_attr_mut(&mut self) -> &mut LoopAttr {
+        &mut self.loop_attr
+    }
 }
 
 impl NodeAttr {
@@ -146,127 +149,6 @@ impl NodeAttr {
 }
 
 type LoopGraph = ControlFlowGraph<NodeAttr>;
-
-struct LoopMarker {
-    visited: Vec<usize>,
-    in_stack: Vec<bool>,
-    node_map: HashMap<NodeIndex, usize>,
-    dfn: usize,
-    entry: NodeIndex,
-}
-
-impl LoopMarker {
-    pub fn mark(graph: &mut LoopGraph, entry: NodeIndex) {
-        let n = graph.node_count();
-        let mut state = LoopMarker {
-            visited: vec![0; n],
-            in_stack: vec![false; n],
-            node_map: HashMap::new(),
-            dfn: 0,
-            entry,
-        };
-        for (i, node) in enumerate(graph.node_indices()) {
-            state.node_map.insert(node, i);
-        }
-        LoopMarker::clean_loop_attr(graph);
-        state.dfs(graph, entry);
-        state.visited = vec![0; n];
-        state.in_stack = vec![false; n];
-        LoopMarker::mark_range(&mut state, graph, entry);
-    }
-
-    fn clean_loop_attr(graph: &mut LoopGraph) {
-        for attr in graph.node_weights_mut() {
-            attr.loop_attr = LoopAttr {
-                is_head: false,
-                level: usize::MAX,
-                inner: NodeIndex::end(),
-                outer: NodeIndex::end(),
-            };
-        }
-    }
-
-    fn dfs(&mut self, graph: &mut LoopGraph, current: NodeIndex) {
-        let mapped_current = *self.node_map.get(&current).unwrap();
-        self.visited[mapped_current] = 1;
-        self.in_stack[mapped_current] = true;
-        let nexts = ordered_neighbors(graph, current);
-        for next in nexts {
-            let mapped_next = *self.node_map.get(&next).unwrap();
-            if self.visited[mapped_next] != 0 {
-                if self.in_stack[mapped_next] {
-                    /* loop-back edge */
-                    graph.node_weight_mut(next).unwrap().loop_attr.is_head = true;
-                } else {
-                    /* cross edge */
-                }
-            } else {
-                self.dfs(graph, next);
-            }
-        }
-        self.in_stack[mapped_current] = false;
-        graph.node_weight_mut(current).unwrap().loop_attr.level = self.dfn;
-        self.dfn += 1;
-    }
-
-    fn mark_range(&mut self, graph: &mut LoopGraph, current: NodeIndex) {
-        let mapped_current = *self.node_map.get(&current).unwrap();
-        self.in_stack[mapped_current] = true;
-        if graph.node_weight(current).unwrap().loop_attr.is_head {
-            self.mark_range_helper(graph, current);
-        }
-        let nexts = ordered_neighbors(graph, current);
-        for next in nexts {
-            let mapped_next = *self.node_map.get(&next).unwrap();
-            self.visited[mapped_next] += 1;
-            if self.visited[mapped_next] == 1 && next != self.entry {
-                self.mark_range(graph, next);
-            }
-        }
-        self.in_stack[mapped_current] = false;
-    }
-
-    fn mark_range_helper(&mut self, graph: &mut LoopGraph, head: NodeIndex) {
-        let flood_fill = |foward| {
-            let mut queued = HashSet::new();
-            let mut queue = VecDeque::new();
-            queue.push_back(head);
-            queued.insert(head);
-            while let Some(node) = queue.pop_front() {
-                let direction = if foward {
-                    EdgeDirection::Outgoing
-                } else {
-                    EdgeDirection::Incoming
-                };
-                let nexts: Vec<NodeIndex> = graph.neighbors_directed(node, direction).collect();
-                for next in nexts {
-                    let mapped_next = *self.node_map.get(&next).unwrap();
-                    if queued.contains(&next) {
-                        continue;
-                    }
-                    if self.in_stack[mapped_next] {
-                        continue;
-                    }
-                    queue.push_back(next);
-                    queued.insert(next);
-                }
-            }
-            queued
-        };
-        let fill_backward = flood_fill(false);
-        let fill_forward = flood_fill(true);
-        let intersect = fill_backward.intersection(&fill_forward);
-        for node in intersect {
-            LoopMarker::set_loop(graph, *node, head);
-        }
-    }
-
-    fn set_loop(graph: &mut LoopGraph, node: NodeIndex, head: NodeIndex) {
-        let attr = graph.node_weight_mut(node).unwrap();
-        attr.loop_attr.outer = attr.loop_attr.inner;
-        attr.loop_attr.inner = head;
-    }
-}
 
 struct LoopNormalizer {
     order: Vec<NodeIndex>,
