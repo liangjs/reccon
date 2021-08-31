@@ -7,7 +7,7 @@ use itertools::Itertools;
 use petgraph::algo::{dominators, toposort};
 use petgraph::data::DataMap;
 use petgraph::graphmap::DiGraphMap;
-use petgraph::visit::{EdgeRef, IntoEdgeReferences, IntoNodeIdentifiers};
+use petgraph::visit::{EdgeRef, IntoNodeReferences, IntoEdgeReferences, IntoNodeIdentifiers};
 use petgraph::Direction;
 
 use crate::ast::*;
@@ -22,7 +22,7 @@ pub struct ASTRecResult {
 }
 
 pub fn ast_structure<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Option<ASTRecResult> {
-    let (mut graph, entry) = construct_ast_graph(graph, entry)?;
+    let (mut graph, mut entry) = construct_ast_graph(graph, entry)?;
     add_halt(&mut graph);
 
     loop_mark(&mut graph, entry);
@@ -35,10 +35,14 @@ pub fn ast_structure<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Option
         if !attr.loop_attr_ref().is_head {
             continue;
         }
-        //println!("{}", dot_view(&graph, entry));
-        let result = ast_structure_loop(&mut graph, &mut loops, head)?;
-        new_vars.extend(result.new_vars);
-        debug_print(&graph);
+        let entry_in_loop = loops.inside_loop(head, entry);
+        println!("{}", dot_view(&graph, entry));
+        let (new_node, vars) = ast_structure_loop(&mut graph, &mut loops, head)?;
+        new_vars.extend(vars);
+        //debug_print(&graph);
+        if entry_in_loop {
+            entry = new_node;
+        }
     }
 
     let mut result = ast_structure_acyclic(&mut graph, entry)?;
@@ -50,7 +54,7 @@ fn ast_structure_loop(
     graph: &mut ASTGraph,
     loops: &mut LoopNodes<NodeAttr>,
     head: NodeIndex,
-) -> Option<ASTRecResult> {
+) -> Option<(NodeIndex, Vec<String>)> {
     let nodes = loops.get_exist(graph, head);
     let mut ast_map = HashMap::new();
     for node in nodes.iter() {
@@ -59,9 +63,9 @@ fn ast_structure_loop(
     }
 
     let (mut subgraph, entry) = construct_loop_subgraph(graph, loops, head);
-    //println!("{}", dot_view(&subgraph, entry));
+    println!("{}", dot_view(&subgraph, entry));
     let result = ast_structure_acyclic(&mut subgraph, entry)?;
-    //println!("{}", result.stmt.to_string());
+    println!("{}", result.stmt.to_string());
     let ast = AST::AState(Statement::While {
         cond: Box::new(BoolExpr::True),
         body: Box::new(result.stmt.unfold(&ast_map)),
@@ -72,7 +76,7 @@ fn ast_structure_loop(
     graph.node_weight_mut(new_node).unwrap().loop_attr.inner = outer_loop;
     loops.add_node(&graph, new_node);
 
-    Some(result)
+    Some((new_node, result.new_vars))
 }
 
 fn construct_loop_subgraph(
@@ -127,11 +131,12 @@ fn ast_structure_acyclic(graph: &mut ASTGraph, entry: NodeIndex) -> Option<ASTRe
     let new_entry = graph.add_node(NodeAttr::new_node(AST::AState(Statement::Nop)));
     graph.add_edge(new_entry, entry, ControlFlowEdge::NotBranch);
     let entry = new_entry;
+    strip_graph(graph, entry);
     let mut new_vars = Vec::new();
     loop {
         let result = Simplifier::simplify(graph, entry);
         new_vars.extend(result.new_vars);
-        //println!("{}", dot_view(&graph, entry));
+        println!("{}", dot_view(&graph, entry));
         if graph.node_count() == 1 {
             break;
         }
@@ -144,6 +149,27 @@ fn ast_structure_acyclic(graph: &mut ASTGraph, entry: NodeIndex) -> Option<ASTRe
         stmt: ast.clone_state(),
         new_vars,
     })
+}
+
+fn strip_graph(graph: &mut ASTGraph, entry: NodeIndex) {
+    let mut bfs = petgraph::visit::Bfs::new(graph as &ASTGraph, entry);
+    let mut reachable: HashSet<NodeIndex> = HashSet::new();
+    while let Some(node) = bfs.next(graph as &ASTGraph) {
+        reachable.insert(node);
+    }
+    let unreachable: Vec<NodeIndex> = graph
+        .node_references()
+        .filter_map(|x| {
+            if reachable.contains(&x.0) {
+                None
+            } else {
+                Some(x.0)
+            }
+        })
+        .collect();
+    for node in unreachable {
+        graph.remove_node(node);
+    }
 }
 
 fn add_halt(graph: &mut ASTGraph) {

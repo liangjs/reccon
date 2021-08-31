@@ -161,8 +161,8 @@ impl<N: GetLoopAttr> LoopMarker<N> {
 
 pub fn loop_mark<N: GetLoopAttr + Debug>(graph: &mut ControlFlowGraph<N>, entry: NodeIndex) {
     LoopMarker::mark(graph, entry);
-    println!("==== loop mark");
-    debug_print(graph);
+    //println!("==== loop mark");
+    //debug_print(graph);
 }
 
 pub struct LoopNodes<N> {

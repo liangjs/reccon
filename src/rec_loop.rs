@@ -27,8 +27,8 @@ pub fn loop_structure<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Optio
         entry,
         new_vars: new_vars1,
     } = LoopNormalizer::normalize_exit(&mut loop_graph, entry);
-    println!("===== normal exit");
-    debug_print(&loop_graph);
+    //println!("===== normal exit");
+    //debug_print(&loop_graph);
 
     loop_mark(&mut loop_graph, entry);
 
@@ -36,8 +36,8 @@ pub fn loop_structure<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Optio
         entry,
         new_vars: mut new_vars2,
     } = LoopNormalizer::normalize_entry(&mut loop_graph, entry);
-    println!("===== normal entry");
-    debug_print(&loop_graph);
+    //println!("===== normal entry");
+    //debug_print(&loop_graph);
 
     let out_graph = construct_out_graph(&loop_graph);
     let mut new_vars = new_vars1;

@@ -50,18 +50,22 @@ where
     let node_attr = |graph: &'a ControlFlowGraph<N>,
                      node: <&'a ControlFlowGraph<N> as IntoNodeReferences>::NodeRef|
      -> String {
-        let shape = if graph.edges(node.0).count() == 2 {
+        let shape = if node.0 == entry {
+            "shape=triangle"
+        } else if graph.edges(node.0).count() == 2 {
             "shape=diamond"
         } else {
             "shape=box"
         };
+        /*
         let bgcolor = if node.0 == entry {
             "stype=filled,fillcolor=aqua"
         } else {
             "sytle=filled,fillcolor=white"
         };
+        */
         let label: &str = &format!("label=\"{}\"", node.1.to_string());
-        [shape, bgcolor, label].join(",")
+        [shape, label].join(",")
     };
     let view = dot::Dot::with_attr_getters(graph, &config, &edge_attr, &node_attr);
     format!("{:?}", view)

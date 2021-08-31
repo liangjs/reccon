@@ -101,6 +101,7 @@ fn test_mixed_abnormal_selection() {
 
 #[test]
 fn random_test() {
+    random_test_seeded([94, 221, 255, 8, 211, 146, 33, 4, 249, 86, 202, 16, 168, 36, 30, 24, 220, 107, 44, 60, 202, 21, 8, 209, 230, 207, 143, 144, 183, 5, 16, 249], 10, 0.4);
     let tests = [(10, 0.4, 100)];
     for (node_num, density, times) in tests.iter() {
         for _ in 0..*times {
