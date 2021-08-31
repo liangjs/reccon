@@ -22,9 +22,9 @@ pub fn reconstruct<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Option<R
     let loop_result = loop_structure(graph, entry)?;
     let ast_result = ast_structure(&loop_result.graph, loop_result.entry)?;
 
-    let mut map = HashMap::new();
+    let mut ast_map = HashMap::new();
     for (node, ast) in loop_result.graph.node_references() {
-        map.insert(node, ast);
+        ast_map.insert(node, ast);
     }
 
     let mut new_vars = Vec::new();
@@ -32,7 +32,7 @@ pub fn reconstruct<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Option<R
     new_vars.extend(ast_result.new_vars.clone());
 
     Some(RecResult {
-        stmt: ast_result.stmt.unfold(&map),
+        stmt: ast_result.stmt.unfold(&ast_map),
         new_vars
     })
 }

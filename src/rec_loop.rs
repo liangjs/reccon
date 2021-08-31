@@ -115,12 +115,7 @@ impl GetLoopAttr for NodeAttr {
 impl NodeAttr {
     pub fn new(origin: NodeIndex, is_branch: bool) -> NodeAttr {
         NodeAttr {
-            loop_attr: LoopAttr {
-                is_head: false,
-                level: usize::MAX,
-                inner: NodeIndex::end(),
-                outer: NodeIndex::end(),
-            },
+            loop_attr: LoopAttr::default(),
             ast: match is_branch {
                 false => AST::AState(Statement::Original { node_idx: origin }),
                 true => AST::ABool(BoolExpr::Original { node_idx: origin }),

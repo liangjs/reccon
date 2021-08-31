@@ -101,7 +101,7 @@ fn test_mixed_abnormal_selection() {
 
 #[test]
 fn random_test() {
-    let tests = [(6, 0.4, 100)];
+    let tests = [(10, 0.4, 100)];
     for (node_num, density, times) in tests.iter() {
         for _ in 0..*times {
             let mut seed: <ChaCha8Rng as SeedableRng>::Seed = Default::default();

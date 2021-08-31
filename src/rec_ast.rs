@@ -12,6 +12,7 @@ use petgraph::Direction;
 
 use crate::ast::*;
 use crate::graph::*;
+use crate::loop_utils::*;
 
 const VAR_PREFIX: &str = "pred_";
 
@@ -21,24 +22,124 @@ pub struct ASTRecResult {
 }
 
 pub fn ast_structure<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Option<ASTRecResult> {
-    let (mut ast_graph, entry) = construct_ast_graph(graph, entry)?;
-    add_halt(&mut ast_graph);
+    let (mut graph, entry) = construct_ast_graph(graph, entry)?;
+    add_halt(&mut graph);
+
+    loop_mark(&mut graph, entry);
+    let mut new_vars = Vec::new();
+    let mut loops = LoopNodes::new(&graph);
+    let order = LoopNodes::node_order(&graph);
+
+    for head in order {
+        let attr = graph.node_weight(head).unwrap();
+        if !attr.loop_attr_ref().is_head {
+            continue;
+        }
+        //println!("{}", dot_view(&graph, entry));
+        let result = ast_structure_loop(&mut graph, &mut loops, head)?;
+        new_vars.extend(result.new_vars);
+        debug_print(&graph);
+    }
+
+    let mut result = ast_structure_acyclic(&mut graph, entry)?;
+    result.new_vars.extend(new_vars);
+    Some(result)
+}
+
+fn ast_structure_loop(
+    graph: &mut ASTGraph,
+    loops: &mut LoopNodes<NodeAttr>,
+    head: NodeIndex,
+) -> Option<ASTRecResult> {
+    let nodes = loops.get_exist(graph, head);
+    let mut ast_map = HashMap::new();
+    for node in nodes.iter() {
+        let ast = &graph.node_weight(*node).unwrap().ast;
+        ast_map.insert(*node, ast);
+    }
+
+    let (mut subgraph, entry) = construct_loop_subgraph(graph, loops, head);
+    //println!("{}", dot_view(&subgraph, entry));
+    let result = ast_structure_acyclic(&mut subgraph, entry)?;
+    //println!("{}", result.stmt.to_string());
+    let ast = AST::AState(Statement::While {
+        cond: Box::new(BoolExpr::True),
+        body: Box::new(result.stmt.unfold(&ast_map)),
+    });
+
+    let outer_loop = graph.node_weight(head).unwrap().loop_attr.outer;
+    let new_node = replace_block(graph, nodes, ast);
+    graph.node_weight_mut(new_node).unwrap().loop_attr.inner = outer_loop;
+    loops.add_node(&graph, new_node);
+
+    Some(result)
+}
+
+fn construct_loop_subgraph(
+    graph: &ASTGraph,
+    loops: &LoopNodes<NodeAttr>,
+    head: NodeIndex,
+) -> (ASTGraph, NodeIndex) {
+    let nodes: HashSet<NodeIndex> = HashSet::from_iter(loops.get_exist(graph, head));
+    let exit_edges = loops.loop_exits(graph, head);
+
+    let exits_num = exit_edges.iter().map(|x| x.1).unique().count();
+    assert!(exits_num <= 1);
+    let exit = exit_edges.first().and_then(|x| Some(x.1));
+
+    let mut new_graph = ASTGraph::new();
+    let mut node_map = HashMap::new();
+    for x in nodes.iter() {
+        let x = *x;
+        let is_branch = graph.edges(x).count() == 2;
+        let node = new_graph.add_node(NodeAttr::new(x, is_branch));
+        node_map.insert(x, node);
+    }
+
+    let node_continue = new_graph.add_node(NodeAttr::new_node(AST::AState(Statement::Continue)));
+    let node_break = new_graph.add_node(NodeAttr::new_node(AST::AState(Statement::Break)));
+
+    for x in nodes.iter() {
+        let node_x = *node_map.get(x).unwrap();
+        let x = *x;
+        for e in graph.edges(x) {
+            let y = e.target();
+            if y == head {
+                new_graph.add_edge(node_x, node_continue, *e.weight());
+            } else if Some(y) == exit {
+                new_graph.add_edge(node_x, node_break, *e.weight());
+            } else {
+                match node_map.get(&y) {
+                    Some(node_y) => {
+                        new_graph.add_edge(node_x, *node_y, *e.weight());
+                    }
+                    None => panic!("error when building loop subgraph"),
+                }
+            }
+        }
+    }
+
+    let entry = *node_map.get(&head).unwrap();
+    (new_graph, entry)
+}
+
+fn ast_structure_acyclic(graph: &mut ASTGraph, entry: NodeIndex) -> Option<ASTRecResult> {
+    let new_entry = graph.add_node(NodeAttr::new_node(AST::AState(Statement::Nop)));
+    graph.add_edge(new_entry, entry, ControlFlowEdge::NotBranch);
+    let entry = new_entry;
     let mut new_vars = Vec::new();
     loop {
-        let result = Simplifier::simplify(&mut ast_graph, entry);
+        let result = Simplifier::simplify(graph, entry);
         new_vars.extend(result.new_vars);
-        println!("{}", dot_view(&ast_graph, entry));
-        if ast_graph.node_count() == 1 {
+        //println!("{}", dot_view(&graph, entry));
+        if graph.node_count() == 1 {
             break;
         }
         if !result.updated {
-            match Splitter::split(&mut ast_graph, entry) {
-                None => return None,
-                Some(_) => {}
-            };
+            Splitter::split(graph, entry)?;
         }
     }
-    let ast = &ast_graph.node_weights().next()?.ast;
+    let ast = &graph.node_weights().next()?.ast;
     Some(ASTRecResult {
         stmt: ast.clone_state(),
         new_vars,
@@ -87,15 +188,14 @@ fn construct_ast_graph<N>(
         ast_graph.add_edge(*node_x, *node_y, *e.weight());
     }
     let entry = *node_map.get(&entry).unwrap();
-    let new_entry = ast_graph.add_node(NodeAttr::new_node(AST::AState(Statement::Nop)));
-    ast_graph.add_edge(new_entry, entry, ControlFlowEdge::NotBranch);
-    Some((ast_graph, new_entry))
+    Some((ast_graph, entry))
 }
 
 type ASTGraph = ControlFlowGraph<NodeAttr>;
 
 #[derive(Debug)]
 struct NodeAttr {
+    loop_attr: LoopAttr,
     ast: AST,
 }
 
@@ -105,9 +205,20 @@ impl ToString for NodeAttr {
     }
 }
 
+impl GetLoopAttr for NodeAttr {
+    fn loop_attr_ref(&self) -> &LoopAttr {
+        &self.loop_attr
+    }
+
+    fn loop_attr_mut(&mut self) -> &mut LoopAttr {
+        &mut self.loop_attr
+    }
+}
+
 impl NodeAttr {
     pub fn new(origin: NodeIndex, is_branch: bool) -> NodeAttr {
         NodeAttr {
+            loop_attr: LoopAttr::default(),
             ast: match is_branch {
                 false => AST::AState(Statement::Original { node_idx: origin }),
                 true => AST::ABool(BoolExpr::Original { node_idx: origin }),
@@ -116,7 +227,10 @@ impl NodeAttr {
     }
 
     pub fn new_node(ast: AST) -> NodeAttr {
-        NodeAttr { ast }
+        NodeAttr {
+            loop_attr: LoopAttr::default(),
+            ast,
+        }
     }
 }
 
@@ -1087,10 +1201,6 @@ impl<'a> Splitter<'a> {
         if current == imm_post_dom {
             return None;
         }
-        let mut dom_iter = self.doms.dominators(current).unwrap();
-        if !dom_iter.contains(&head) {
-            return Some((current, self.split_node(current, head)));
-        }
         let nexts: Vec<NodeIndex> = self.graph.neighbors(current).collect();
         for next in nexts {
             if self.visited.contains(&next) {
@@ -1100,6 +1210,10 @@ impl<'a> Splitter<'a> {
             if ans.is_some() {
                 return ans;
             }
+        }
+        let mut dom_iter = self.doms.dominators(current).unwrap();
+        if !dom_iter.contains(&head) {
+            return Some((current, self.split_node(current, head)));
         }
         None
     }

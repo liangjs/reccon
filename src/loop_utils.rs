@@ -16,6 +16,17 @@ pub struct LoopAttr {
     pub outer: NodeIndex,
 }
 
+impl Default for LoopAttr {
+    fn default() -> Self {
+        Self {
+            is_head: false,
+            level: usize::MAX,
+            inner: NodeIndex::end(),
+            outer: NodeIndex::end(),
+        }
+    }
+}
+
 pub trait GetLoopAttr {
     fn loop_attr_ref(&self) -> &LoopAttr;
     fn loop_attr_mut(&mut self) -> &mut LoopAttr;
@@ -214,8 +225,26 @@ impl<N: GetLoopAttr> LoopNodes<N> {
         NodeIndex::end()
     }
 
-    pub fn get(&self, head: NodeIndex) -> &HashSet<NodeIndex> {
-        self.loop_nodes.get(&head).unwrap()
+    pub fn get(&self, head: NodeIndex) -> Vec<NodeIndex> {
+        self.loop_nodes
+            .get(&head)
+            .unwrap()
+            .iter()
+            .map(|x| *x)
+            .collect()
+    }
+
+    pub fn get_exist(&self, graph: &ControlFlowGraph<N>, head: NodeIndex) -> Vec<NodeIndex> {
+        self.get(head)
+            .iter()
+            .filter_map(|x| {
+                if graph.contains_node(*x) {
+                    Some(*x)
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     pub fn inside_loop(&self, head: NodeIndex, node: NodeIndex) -> bool {
@@ -230,7 +259,6 @@ impl<N: GetLoopAttr> LoopNodes<N> {
         let mut exits = Vec::new();
         let nodes = self.get(head);
         for x in sorted(nodes) {
-            let x = *x;
             for y in graph.neighbors_directed(x, EdgeDirection::Outgoing) {
                 if !self.inside_loop(head, y) {
                     exits.push((x, y));
@@ -249,7 +277,6 @@ impl<N: GetLoopAttr> LoopNodes<N> {
         let mut entries = Vec::new();
         let nodes = self.get(head);
         for x in sorted(nodes) {
-            let x = *x;
             for y in graph.neighbors_directed(x, EdgeDirection::Incoming) {
                 if !self.inside_loop(head, y) {
                     entries.push((y, x));
