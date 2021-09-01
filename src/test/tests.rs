@@ -165,8 +165,49 @@ fn test_loop_condition() {
 }
 
 #[test]
+fn test_dfs_order() {
+    test_graph(
+        9,
+        7,
+        vec![
+            (7, 3),
+            (7, 6),
+            (3, 0),
+            (3, 8),
+            (6, 5),
+            (6, 4),
+            (0, 2),
+            (5, 1),
+            (5, 2),
+            (1, 0),
+            (2, 6),
+            (8, 7),
+        ],
+    );
+    test_graph(
+        10,
+        6,
+        vec![
+            (6, 0),
+            (6, 7),
+            (0, 3),
+            (0, 9),
+            (7, 5),
+            (7, 2),
+            (3, 1),
+            (3, 8),
+            (5, 6),
+            (8, 4),
+            (8, 4),
+            (2, 3),
+            (4, 0),
+        ],
+    );
+}
+
+#[test]
 fn random_test() {
-    let tests = [(10, 0.4, 100)];
+    let tests = [(10, 0.5, 100)];
     for (node_num, density, times) in tests.iter() {
         for _ in 0..*times {
             let mut seed: <ChaCha8Rng as SeedableRng>::Seed = Default::default();

@@ -110,14 +110,14 @@ pub fn random_graph<T: Rng>(
 pub fn random_test_seeded(seed: <ChaCha8Rng as SeedableRng>::Seed, node_num: usize, density: f64) {
     let mut rng = ChaCha8Rng::from_seed(seed);
     let (graph, entry) = random_graph(&mut rng, node_num, density);
-    println!("{}", dot_view(&graph, entry));
+    //println!("{}", dot_view(&graph, entry));
     let result = match reconstruct(&graph, entry) {
         None => {
             panic!("reconstruct failed");
         }
         Some(r) => r,
     };
-    println!("{}", result.stmt.to_string());
+    //println!("{}", result.stmt.to_string());
     Walker::exhaustive_walk(&graph, entry, &result);
 }
 
