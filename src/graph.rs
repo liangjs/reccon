@@ -51,7 +51,7 @@ where
                      node: <&'a ControlFlowGraph<N> as IntoNodeReferences>::NodeRef|
      -> String {
         let shape = if node.0 == entry {
-            "shape=triangle"
+            "shape=circle"
         } else if graph.edges(node.0).count() == 2 {
             "shape=diamond"
         } else {

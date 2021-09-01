@@ -59,7 +59,7 @@ impl<N: GetLoopAttr> LoopMarker<N> {
         state.dfs(graph, entry);
         state.visited = vec![0; n];
         state.in_stack = vec![false; n];
-        LoopMarker::mark_range(&mut state, graph, entry);
+        state.mark_range(graph, entry);
     }
 
     fn clean_loop_attr(graph: &mut ControlFlowGraph<N>) {
@@ -210,14 +210,30 @@ impl<N: GetLoopAttr> LoopNodes<N> {
         }
     }
 
+    pub fn remove_node(&mut self, node: NodeIndex) {
+        self.loop_nodes.remove(&node);
+        for (_, s) in self.loop_nodes.iter_mut() {
+            s.remove(&node);
+        }
+    }
+    
+    pub fn remove_nodes(&mut self, nodes: &Vec<NodeIndex>) {
+        for node in nodes {
+            self.remove_node(*node);
+        }
+    }
+
     pub fn common_loop(
         graph: &ControlFlowGraph<N>,
         node1: NodeIndex,
         node2: NodeIndex,
     ) -> NodeIndex {
+        if node1 == NodeIndex::end() || node2 == NodeIndex::end() {
+            return NodeIndex::end();
+        }
         let loops1 = LoopNodes::nested_loops(graph, node1);
         let loops2 = LoopNodes::nested_loops(graph, node2);
-        for x in loops1.iter().rev() {
+        for x in loops1.iter() {
             if loops2.contains(x) {
                 return *x;
             }

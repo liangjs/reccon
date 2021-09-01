@@ -29,6 +29,7 @@ pub fn loop_structure<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Optio
     } = LoopNormalizer::normalize_exit(&mut loop_graph, entry);
     //println!("===== normal exit");
     //debug_print(&loop_graph);
+    //println!("{}", dot_view(&loop_graph, entry));
 
     loop_mark(&mut loop_graph, entry);
 
@@ -188,22 +189,31 @@ impl LoopNormalizer {
     }
 
     fn normalize_exit_one(&mut self, graph: &mut LoopGraph, head: NodeIndex) {
-        let exits = self.loops.loop_exits(graph, head);
+        let mut exits = self.loops.loop_exits(graph, head);
         let entries = self.loops.abnormal_entries(graph, head);
         let n = exits.len();
+
+        //debug_print(graph);
+        //println!("{}", dot_view(graph, self.entry));
 
         /* already normalized */
         if exits.len() <= 1 {
             return;
         }
         let exits_num = exits.iter().map(|x| x.1).unique().count();
-
         if exits_num <= 1 {
             // how can this be wrong?
             return;
         }
 
-        let outter_loop = graph.node_weight(head).unwrap().loop_attr.outer;
+        let outer_loop = graph.node_weight(head).unwrap().loop_attr.outer;
+        exits.sort_by_key(|e| {
+            let com = LoopNodes::common_loop(graph, outer_loop, e.1);
+            if com == NodeIndex::end() {
+                return usize::MAX;
+            }
+            graph.node_weight(com).unwrap().loop_attr.level
+        });
 
         /* create new vars */
         let c_var = format!("{}{}", VAR_PREFIX, head.index());
@@ -211,7 +221,7 @@ impl LoopNormalizer {
 
         /* node assgin c=-1 */
         let c_assign_init = graph.add_node(NodeAttr::new_node(
-            outter_loop,
+            outer_loop,
             AST::AState(Statement::Assign {
                 var: c_var.clone(),
                 value: Box::new(Expr::Int(-1)),
@@ -229,7 +239,7 @@ impl LoopNormalizer {
                 let out_i = exits[i].1;
                 /* if (c==i) out_i else out_node */
                 let c_cond = graph.add_node(NodeAttr::new_node(
-                    outter_loop,
+                    LoopNodes::common_loop(graph, outer_loop, out_i),
                     AST::ABool(BoolExpr::Eq {
                         var: c_var.clone(),
                         value: Box::new(Expr::Int(i as i32)),
@@ -281,12 +291,11 @@ impl LoopNormalizer {
             if prev == c_cond {
                 continue;
             }
-            let new_dest;
-            if graph.node_weight(prev).unwrap().loop_attr.inner == head {
-                new_dest = c_cond;
+            let new_dest = if self.loops.inside_loop(head, prev) {
+                c_cond
             } else {
-                new_dest = c_assign_init;
-            }
+                c_assign_init
+            };
             replace_edge_dest(graph, prev, head, new_dest);
         }
 
