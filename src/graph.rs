@@ -20,7 +20,7 @@ pub type ControlFlowGraph<N> = petgraph::stable_graph::StableGraph<
 pub fn debug_print<N: Debug>(graph: &ControlFlowGraph<N>) {
     println!("node num: {}", graph.node_count());
     for (i, weight) in graph.node_references() {
-        println!("note {}: {:?}", i.index(), weight);
+        println!("node {}: {:?}", i.index(), weight);
     }
     for e in graph.edge_references() {
         println!("{} -> {}", e.source().index(), e.target().index());
