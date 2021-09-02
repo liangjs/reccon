@@ -127,13 +127,11 @@ impl NodeAttr {
     }
 
     pub fn new_node(level: usize, inner_loop: NodeIndex, ast: AST) -> NodeAttr {
+        let mut loop_attr = LoopAttr::default();
+        loop_attr.dfn_pre = level;
+        loop_attr.inner = inner_loop;
         NodeAttr {
-            loop_attr: LoopAttr {
-                is_head: false,
-                level,
-                inner: inner_loop,
-                outer: NodeIndex::end(),
-            }, // not used
+            loop_attr,
             ast,
         }
     }
@@ -211,10 +209,10 @@ impl LoopNormalizer {
         let outer_loop = graph.node_weight(head).unwrap().loop_attr.outer;
         exits.sort_by_key(|e| {
             let attr = graph.node_weight(e.1).unwrap();
-            cmp::Reverse(attr.loop_attr.level)
+            cmp::Reverse(attr.loop_attr.dfn_pre)
         });
 
-        let head_dfn = graph.node_weight(head).unwrap().loop_attr.level;
+        let head_dfn = graph.node_weight(head).unwrap().loop_attr.dfn_pre;
 
         /* create new vars */
         let c_var = format!("{}{}", VAR_PREFIX, head.index());
@@ -241,7 +239,7 @@ impl LoopNormalizer {
         let mut common_loop_last = LoopNodes::common_loop(graph, outer_loop, out_node);
         let loop_level = |graph: &LoopGraph, node| match graph.node_weight(node) {
             None => usize::MAX,
-            Some(attr) => attr.loop_attr.level,
+            Some(attr) => attr.loop_attr.dfn_post,
         };
 
         if exits_num > 1 {

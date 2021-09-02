@@ -11,7 +11,8 @@ use crate::graph::*;
 #[derive(Debug, Clone)]
 pub struct LoopAttr {
     pub is_head: bool,
-    pub level: usize,
+    pub dfn_pre: usize,
+    pub dfn_post: usize,
     pub inner: NodeIndex,
     pub outer: NodeIndex,
 }
@@ -20,7 +21,8 @@ impl Default for LoopAttr {
     fn default() -> Self {
         Self {
             is_head: false,
-            level: usize::MAX,
+            dfn_pre: usize::MAX,
+            dfn_post: usize::MAX,
             inner: NodeIndex::end(),
             outer: NodeIndex::end(),
         }
@@ -66,7 +68,8 @@ impl<N: GetLoopAttr> LoopMarker<N> {
         for attr in graph.node_weights_mut() {
             *attr.loop_attr_mut() = LoopAttr {
                 is_head: false,
-                level: usize::MAX,
+                dfn_pre: usize::MAX,
+                dfn_post: usize::MAX,
                 inner: NodeIndex::end(),
                 outer: NodeIndex::end(),
             };
@@ -77,6 +80,11 @@ impl<N: GetLoopAttr> LoopMarker<N> {
         let mapped_current = *self.node_map.get(&current).unwrap();
         self.visited[mapped_current] = 1;
         self.in_stack[mapped_current] = true;
+        graph
+            .node_weight_mut(current)
+            .unwrap()
+            .loop_attr_mut()
+            .dfn_pre = self.dfn;
         let nexts = ordered_neighbors(graph, current);
         for next in nexts {
             let mapped_next = *self.node_map.get(&next).unwrap();
@@ -96,7 +104,7 @@ impl<N: GetLoopAttr> LoopMarker<N> {
             .node_weight_mut(current)
             .unwrap()
             .loop_attr_mut()
-            .level = self.dfn;
+            .dfn_post = self.dfn;
         self.dfn += 1;
     }
 
@@ -319,7 +327,7 @@ impl<N: GetLoopAttr> LoopNodes<N> {
     pub fn node_order(graph: &ControlFlowGraph<N>) -> Vec<NodeIndex> {
         let mut order: Vec<(NodeIndex, usize)> = graph
             .node_references()
-            .map(|x| (x.0, x.1.loop_attr_ref().level))
+            .map(|x| (x.0, x.1.loop_attr_ref().dfn_post))
             .collect();
         order.sort_by(|a, b| a.1.cmp(&b.1));
         order.iter().map(|x| x.0).collect()
