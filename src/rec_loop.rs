@@ -2,8 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::usize;
 
 use itertools::Itertools;
-use petgraph::visit::EdgeRef;
-use petgraph::visit::IntoEdgeReferences;
+use petgraph::visit::{EdgeRef, NodeRef};
 use petgraph::EdgeDirection;
 
 use crate::ast::*;
@@ -18,7 +17,8 @@ pub struct LoopRecOutput {
     pub new_vars: Vec<String>,
 }
 
-pub fn loop_structure<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Option<LoopRecOutput> {
+pub fn loop_structure<G: CFG>(graph: G, entry: NodeIndex) -> Option<LoopRecOutput>
+{
     let (mut loop_graph, entry) = construct_loop_graph(graph, entry)?;
 
     loop_mark(&mut loop_graph, entry);
@@ -49,13 +49,12 @@ pub fn loop_structure<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Optio
     })
 }
 
-fn construct_loop_graph<N>(
-    graph: &ControlFlowGraph<N>,
-    entry: NodeIndex,
-) -> Option<(LoopGraph, NodeIndex)> {
+fn construct_loop_graph<G: CFG>(graph: G, entry: NodeIndex) -> Option<(LoopGraph, NodeIndex)>
+{
     let mut loop_graph = LoopGraph::new();
     let mut node_map = HashMap::new();
-    for x in graph.node_indices() {
+    for x in graph.node_references() {
+        let x = x.id();
         let is_branch = graph.edges(x).count() == 2;
         let node = loop_graph.add_node(NodeAttr::new(x, is_branch));
         node_map.insert(x, node);
