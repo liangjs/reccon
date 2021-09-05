@@ -18,8 +18,7 @@ pub struct RecResult {
     pub new_vars: Vec<String>,
 }
 
-pub fn reconstruct<G: graph::CFG>(graph: G, entry: NodeIndex) -> Option<RecResult>
-{
+pub fn reconstruct<G: graph::CFG>(graph: G, entry: NodeIndex) -> Option<RecResult> {
     let loop_result = loop_structure(graph, entry)?;
     let ast_result = ast_structure(&loop_result.graph, loop_result.entry)?;
 

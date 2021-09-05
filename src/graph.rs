@@ -33,7 +33,7 @@ impl<'a, N: 'a> CFG for &'a ControlFlowGraph<N> {}
 pub fn debug_print<N: Debug>(graph: &ControlFlowGraph<N>) {
     println!("node num: {}", graph.node_count());
     for (i, weight) in graph.node_references() {
-        println!("note {}: {:?}", i.index(), weight);
+        println!("node {}: {:?}", i.index(), weight);
     }
     for e in graph.edge_references() {
         println!("{} -> {}", e.source().index(), e.target().index());
@@ -64,7 +64,7 @@ where
                      node: <&'a ControlFlowGraph<N> as IntoNodeReferences>::NodeRef|
      -> String {
         let shape = if node.0 == entry {
-            "shape=triangle"
+            "shape=circle"
         } else if graph.edges(node.0).count() == 2 {
             "shape=diamond"
         } else {

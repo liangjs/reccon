@@ -1,3 +1,4 @@
+use std::cmp;
 use std::collections::{HashMap, VecDeque};
 use std::usize;
 
@@ -17,8 +18,7 @@ pub struct LoopRecOutput {
     pub new_vars: Vec<String>,
 }
 
-pub fn loop_structure<G: CFG>(graph: G, entry: NodeIndex) -> Option<LoopRecOutput>
-{
+pub fn loop_structure<G: CFG>(graph: G, entry: NodeIndex) -> Option<LoopRecOutput> {
     let (mut loop_graph, entry) = construct_loop_graph(graph, entry)?;
 
     loop_mark(&mut loop_graph, entry);
@@ -29,6 +29,7 @@ pub fn loop_structure<G: CFG>(graph: G, entry: NodeIndex) -> Option<LoopRecOutpu
     } = LoopNormalizer::normalize_exit(&mut loop_graph, entry);
     //println!("===== normal exit");
     //debug_print(&loop_graph);
+    //println!("{}", dot_view(&loop_graph, entry));
 
     loop_mark(&mut loop_graph, entry);
 
@@ -38,6 +39,7 @@ pub fn loop_structure<G: CFG>(graph: G, entry: NodeIndex) -> Option<LoopRecOutpu
     } = LoopNormalizer::normalize_entry(&mut loop_graph, entry);
     //println!("===== normal entry");
     //debug_print(&loop_graph);
+    //println!("{}", dot_view(&loop_graph, entry));
 
     let out_graph = construct_out_graph(&loop_graph);
     let mut new_vars = new_vars1;
@@ -49,8 +51,7 @@ pub fn loop_structure<G: CFG>(graph: G, entry: NodeIndex) -> Option<LoopRecOutpu
     })
 }
 
-fn construct_loop_graph<G: CFG>(graph: G, entry: NodeIndex) -> Option<(LoopGraph, NodeIndex)>
-{
+fn construct_loop_graph<G: CFG>(graph: G, entry: NodeIndex) -> Option<(LoopGraph, NodeIndex)> {
     let mut loop_graph = LoopGraph::new();
     let mut node_map = HashMap::new();
     for x in graph.node_references() {
@@ -122,16 +123,11 @@ impl NodeAttr {
         }
     }
 
-    pub fn new_node(inner_loop: NodeIndex, ast: AST) -> NodeAttr {
-        NodeAttr {
-            loop_attr: LoopAttr {
-                is_head: false,
-                level: usize::MAX,
-                inner: inner_loop,
-                outer: NodeIndex::end(),
-            }, // not used
-            ast,
-        }
+    pub fn new_node(level: usize, inner_loop: NodeIndex, ast: AST) -> NodeAttr {
+        let mut loop_attr = LoopAttr::default();
+        loop_attr.dfn_pre = level;
+        loop_attr.inner = inner_loop;
+        NodeAttr { loop_attr, ast }
     }
 }
 
@@ -187,22 +183,30 @@ impl LoopNormalizer {
     }
 
     fn normalize_exit_one(&mut self, graph: &mut LoopGraph, head: NodeIndex) {
-        let exits = self.loops.loop_exits(graph, head);
+        let mut exits = self.loops.loop_exits(graph, head);
         let entries = self.loops.abnormal_entries(graph, head);
         let n = exits.len();
+
+        //debug_print(graph);
+        //println!("{}", dot_view(graph, self.entry));
 
         /* already normalized */
         if exits.len() <= 1 {
             return;
         }
         let exits_num = exits.iter().map(|x| x.1).unique().count();
-
         if exits_num <= 1 {
             // how can this be wrong?
             return;
         }
 
-        let outter_loop = graph.node_weight(head).unwrap().loop_attr.outer;
+        let outer_loop = graph.node_weight(head).unwrap().loop_attr.outer;
+        exits.sort_by_key(|e| {
+            let attr = graph.node_weight(e.1).unwrap();
+            cmp::Reverse(attr.loop_attr.dfn_pre)
+        });
+
+        let head_dfn = graph.node_weight(head).unwrap().loop_attr.dfn_pre;
 
         /* create new vars */
         let c_var = format!("{}{}", VAR_PREFIX, head.index());
@@ -210,7 +214,8 @@ impl LoopNormalizer {
 
         /* node assgin c=-1 */
         let c_assign_init = graph.add_node(NodeAttr::new_node(
-            outter_loop,
+            head_dfn,
+            outer_loop,
             AST::AState(Statement::Assign {
                 var: c_var.clone(),
                 value: Box::new(Expr::Int(-1)),
@@ -222,13 +227,26 @@ impl LoopNormalizer {
         }
 
         /* the branches after loop */
+
         let mut out_node = exits[n - 1].1;
+
+        let mut common_loop_last = LoopNodes::common_loop(graph, outer_loop, out_node);
+        let loop_level = |graph: &LoopGraph, node| match graph.node_weight(node) {
+            None => usize::MAX,
+            Some(attr) => attr.loop_attr.dfn_post,
+        };
+
         if exits_num > 1 {
             for i in (0..n - 1).rev() {
                 let out_i = exits[i].1;
+                let common_loop_cur = LoopNodes::common_loop(graph, outer_loop, out_i);
+                if loop_level(graph, common_loop_last) > loop_level(graph, common_loop_cur) {
+                    common_loop_last = common_loop_cur;
+                }
                 /* if (c==i) out_i else out_node */
                 let c_cond = graph.add_node(NodeAttr::new_node(
-                    outter_loop,
+                    usize::MAX,
+                    common_loop_last,
                     AST::ABool(BoolExpr::Eq {
                         var: c_var.clone(),
                         value: Box::new(Expr::Int(i as i32)),
@@ -243,23 +261,27 @@ impl LoopNormalizer {
 
         /* loop condition */
         let c_cond = graph.add_node(NodeAttr::new_node(
+            usize::MAX,
             head,
-            AST::ABool(BoolExpr::Eq {
-                var: c_var.clone(),
-                value: Box::new(Expr::Int(-1)),
+            AST::ABool(BoolExpr::Not {
+                value: Box::new(BoolExpr::Eq {
+                    var: c_var.clone(),
+                    value: Box::new(Expr::Int(-1)),
+                }),
             }),
         ));
         self.loops.add_node(graph, c_cond);
         /* edge c_assign_init->c_cond */
         graph.add_edge(c_assign_init, c_cond, ControlFlowEdge::NotBranch);
         /* if (c == -1) head else out_node */
-        graph.add_edge(c_cond, out_node, ControlFlowEdge::Branch(false));
-        graph.add_edge(c_cond, head, ControlFlowEdge::Branch(true));
+        graph.add_edge(c_cond, out_node, ControlFlowEdge::Branch(true));
+        graph.add_edge(c_cond, head, ControlFlowEdge::Branch(false));
 
         /* remove abnormal exits */
         for i in 0..n {
             /* node assgin c=i */
             let c_assign = graph.add_node(NodeAttr::new_node(
+                usize::MAX,
                 head,
                 AST::AState(Statement::Assign {
                     var: c_var.clone(),
@@ -280,12 +302,11 @@ impl LoopNormalizer {
             if prev == c_cond {
                 continue;
             }
-            let new_dest;
-            if graph.node_weight(prev).unwrap().loop_attr.inner == head {
-                new_dest = c_cond;
+            let new_dest = if self.loops.inside_loop(head, prev) {
+                c_cond
             } else {
-                new_dest = c_assign_init;
-            }
+                c_assign_init
+            };
             replace_edge_dest(graph, prev, head, new_dest);
         }
 
@@ -293,6 +314,7 @@ impl LoopNormalizer {
         for (prev, ent) in entries {
             /* node assgin c=-1 */
             let c_assign_init = graph.add_node(NodeAttr::new_node(
+                usize::MAX,
                 LoopNodes::common_loop(graph, head, prev),
                 AST::AState(Statement::Assign {
                     var: c_var.clone(),
@@ -320,6 +342,9 @@ impl LoopNormalizer {
     fn normalize_entry_one(&mut self, graph: &mut LoopGraph, head: NodeIndex) {
         let entries = self.loops.abnormal_entries(graph, head);
         let mut dup_nodes = HashMap::new();
+
+        //debug_print(&graph);
+        //println!("{}", dot_view(graph, self.entry));
 
         for (prev, ent) in entries.iter() {
             let prev = *prev;
