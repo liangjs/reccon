@@ -1,13 +1,13 @@
-pub mod graph;
 pub mod ast;
+pub mod graph;
 
 mod loop_utils;
 
 mod rec_loop;
 use std::collections::HashMap;
 
-use graph::ControlFlowGraph;
-use petgraph::{graph::NodeIndex, visit::IntoNodeReferences};
+use petgraph::graph::NodeIndex;
+use petgraph::visit::IntoNodeReferences;
 pub use rec_loop::*;
 
 mod rec_ast;
@@ -18,7 +18,7 @@ pub struct RecResult {
     pub new_vars: Vec<String>,
 }
 
-pub fn reconstruct<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Option<RecResult> {
+pub fn reconstruct<G: graph::CFG>(graph: G, entry: NodeIndex) -> Option<RecResult> {
     let loop_result = loop_structure(graph, entry)?;
     let ast_result = ast_structure(&loop_result.graph, loop_result.entry)?;
 
@@ -33,7 +33,7 @@ pub fn reconstruct<N>(graph: &ControlFlowGraph<N>, entry: NodeIndex) -> Option<R
 
     Some(RecResult {
         stmt: ast_result.stmt.unfold(&ast_map),
-        new_vars
+        new_vars,
     })
 }
 
